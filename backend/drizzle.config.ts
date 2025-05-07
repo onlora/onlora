@@ -6,7 +6,7 @@ dotenv.config({
 })
 
 export default {
-  schema: './src/db/*-schema.ts', // Glob pattern to include both schema.ts and auth-schema.ts
+  schema: ['./src/db/schema.ts', './src/db/auth-schema.ts'], // Explicitly list both schema files
   out: './src/db/migrations',
   dialect: 'postgresql', // Specify dialect as postgresql for pg driver
   dbCredentials: {

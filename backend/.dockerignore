@@ -1,0 +1,31 @@
+# Docker ignore file for backend
+
+# Node modules
+node_modules
+
+# Build output
+dist
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Environment files
+.env*
+!.env.example
+
+# Drizzle migrations (potentially sensitive, usually run outside the container image)
+# src/db/migrations
+
+# OS generated files
+.DS_Store
+
+# Test coverage
+coverage
+
+# Docker files
+Dockerfile
+.dockerignore 

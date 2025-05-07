@@ -13,6 +13,9 @@ import {
 } from 'drizzle-orm/pg-core'
 import { users } from './auth-schema'
 
+// Re-export users so it can be imported from this module by other files
+export { users }
+
 // Enums
 export const visibilityEnum = pgEnum('visibility_e', ['public', 'private'])
 export const messageRoleEnum = pgEnum('message_role_e', ['user', 'ai'])
@@ -49,7 +52,12 @@ export const images = pgTable('images', {
     onDelete: 'cascade',
   }),
   url: text('url').notNull(),
+  r2Key: text('r2_key'), // Key for the object in R2 storage
   model: text('model'),
+  prompt: text('prompt'), // The prompt used to generate the image
+  // Optional: add width, height, format if needed from AI metadata
+  // width: integer('width'),
+  // height: integer('height'),
   isPublic: boolean('is_public').default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })

@@ -1,15 +1,48 @@
 import { EventEmitter } from 'node:events'
 import { serve } from '@hono/node-server'
-import { type Context, Hono } from 'hono'
+import { zValidator } from '@hono/zod-validator'
+import { eq } from 'drizzle-orm'
+import { type Context, Hono, type TypedResponse } from 'hono'
 import { logger } from 'hono/logger'
 import { secureHeaders } from 'hono/secure-headers'
 import { type SSEStreamingApi, streamSSE } from 'hono/streaming'
 import pino from 'pino'
+import { z } from 'zod'
+import { db } from './db'
+import { jams } from './db/schema'
 import { auth } from './lib/auth'
 import { startJobQueue } from './lib/jobQueue.js'
+import {
+  type AuthenticatedContextEnv,
+  requireAuthMiddleware,
+} from './middleware/auth'
 
-// Initialize Hono app
-const app = new Hono()
+// Define the Zod schema for the generate image request body
+const generateImageRequestBodySchema = z.object({
+  prompt: z
+    .string()
+    .min(1, { message: 'Prompt cannot be empty.' })
+    .max(4000, { message: 'Prompt too long.' }),
+  modelProvider: z.enum(['openai', 'google'], {
+    errorMap: () => ({ message: 'Invalid model provider.' }),
+  }),
+  modelId: z.string().min(1, { message: 'Model ID cannot be empty.' }),
+  size: z.string().regex(/^\d+x\d+$/, {
+    message: 'Invalid size format, expected e.g., 1024x1024.',
+  }),
+})
+
+// Define the type for our application's environment, including validated data
+interface AppEnv extends AuthenticatedContextEnv {
+  // This tells Hono what c.req.valid('json') will return
+  ValidatedData: {
+    json: z.infer<typeof generateImageRequestBodySchema>
+  }
+  // Add other validation targets (e.g., 'form', 'query') here if used elsewhere
+}
+
+// Initialize Hono app with the combined environment type
+const app = new Hono<AppEnv>()
 
 // Setup Pino logger
 // In production, you might want to use pino.destination to write to a file or a log management service
@@ -101,6 +134,154 @@ app.get('/health', (c) => {
 
 // --- API Routes (Placeholder for actual application API routes) ---
 // Example: app.route('/api/posts', postsRouter); // Assuming postsRouter is defined elsewhere
+
+// Create a new Jam session
+app.post('/api/jams', requireAuthMiddleware, async (c) => {
+  const user = c.get('user')
+
+  // This check is technically redundant due to requireAuthMiddleware enforcing user existence,
+  // but good for type safety and clarity if requireAuthMiddleware were ever made optional for a route.
+  if (!user || !user.id) {
+    return c.json(
+      { code: 401, message: 'User not authenticated or user ID missing' },
+      401,
+    )
+  }
+
+  try {
+    const newJam = await db
+      .insert(jams)
+      .values({
+        userId: user.id, // user.id should be the UUID string from better-auth
+        // created_at is handled by DB default
+      })
+      .returning({ id: jams.id })
+
+    if (!newJam || newJam.length === 0 || !newJam[0].id) {
+      pinoLogger.error(
+        { userId: user.id },
+        'Failed to create new jam or retrieve its ID after insert',
+      )
+      return c.json({ code: 500, message: 'Failed to create jam session' }, 500)
+    }
+
+    pinoLogger.info({ userId: user.id, jamId: newJam[0].id }, 'New jam created')
+    return c.json({ jamId: newJam[0].id }, 201)
+  } catch (error) {
+    pinoLogger.error(
+      { err: error, userId: user.id },
+      'Error creating new jam session',
+    )
+    return c.json(
+      { code: 500, message: 'Internal server error while creating jam' },
+      500,
+    )
+  }
+})
+
+// Generate image(s) for a Jam
+app.post(
+  '/api/jams/:jamId/generate',
+  requireAuthMiddleware,
+  zValidator('json', generateImageRequestBodySchema),
+  async (
+    c: Context<AppEnv>,
+  ): Promise<
+    TypedResponse<
+      | { taskId: string }
+      | {
+          code: number
+          message: string
+          errors?: z.inferFlattenedErrors<typeof generateImageRequestBodySchema>
+        }
+      | {
+          code: number
+          message: string
+          currentVE?: number
+          requiredVE?: number
+        } // For insufficient VE
+    >
+  > => {
+    const user = c.get('user')
+    // Add an explicit check for user and user.id for type narrowing and safety
+    if (!user || !user.id) {
+      pinoLogger.error(
+        { path: c.req.path },
+        'User object or user.id missing after requireAuthMiddleware. This should not happen.',
+      )
+      return c.json(
+        {
+          code: 500,
+          message: 'Internal server error: User authentication data missing.',
+        },
+        500,
+      )
+    }
+
+    const jamId = c.req.param('jamId')
+    const validatedBody = c.req.valid('json' as never) as z.infer<
+      typeof generateImageRequestBodySchema
+    >
+
+    const REQUIRED_VE_FOR_GENERATION = 6
+
+    try {
+      // Step 1: Check user's VE balance
+      const userRecord = await db
+        .select({ vibeEnergy: usersTable.vibe_energy })
+        .from(usersTable) // usersTable should be in scope from imports
+        .where(eq(usersTable.id, user.id)) // user.id is now narrowed and safe
+        .limit(1)
+
+      if (!userRecord || userRecord.length === 0) {
+        pinoLogger.error(
+          { userId: user.id },
+          'User not found in database for VE check',
+        )
+        return c.json({ code: 404, message: 'User not found' }, 404)
+      }
+
+      const currentVE = userRecord[0].vibeEnergy
+      if (currentVE < REQUIRED_VE_FOR_GENERATION) {
+        pinoLogger.warn(
+          {
+            userId: user.id,
+            currentVE,
+            requiredVE: REQUIRED_VE_FOR_GENERATION,
+          },
+          'Insufficient Vibe Energy for image generation',
+        )
+        return c.json(
+          {
+            code: 402,
+            message:
+              'Insufficient Vibe Energy. Generate more or earn VE by posting.',
+            currentVE: currentVE,
+            requiredVE: REQUIRED_VE_FOR_GENERATION,
+          },
+          402,
+        )
+      }
+
+      pinoLogger.info(
+        { userId: user.id, currentVE },
+        'User has sufficient VE for generation.',
+      )
+
+      const tempTaskId = crypto.randomUUID()
+      return c.json({ taskId: tempTaskId }, 202)
+    } catch (error) {
+      pinoLogger.error(
+        { err: error, userId: user.id },
+        'Error during VE check for image generation',
+      )
+      return c.json(
+        { code: 500, message: 'Internal server error during VE check' },
+        500,
+      )
+    }
+  },
+)
 
 // Helper function for delay
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))

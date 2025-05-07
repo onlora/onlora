@@ -1,45 +1,47 @@
-# Stage 1: Install dependencies and build the application
-FROM oven/bun:1 as build
-
+# Stage 1: Install dependencies
+FROM node:20-slim AS deps
 WORKDIR /app
 
-# Copy package.json and bun.lockb
-COPY package.json bun.lockb ./
+# Install dependencies based on lock file
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production --ignore-scripts
 
-# Install dependencies using bun
-# Use --frozen-lockfile for reproducible installs in CI/CD
-RUN bun install --frozen-lockfile
+# Stage 2: Build the application
+FROM node:20-slim AS builder
+WORKDIR /app
 
-# Copy the rest of the application code
+# Copy dependencies from the previous stage
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Build the application using TypeScript compiler (tsc)
-# Ensure your tsconfig.json has the correct `outDir` (e.g., ./dist)
-RUN bun run build
+# Install dev dependencies needed for build
+# We copy package*.json again in case build scripts need devDependencies
+COPY package.json package-lock.json* ./
+RUN npm install --ignore-scripts
 
-# Stage 2: Create the final production image
-# Use a minimal Node.js base image
-FROM node:20-slim
+# Build TypeScript
+RUN npm run build
 
+# Prune dev dependencies (optional, reduces intermediate layer size)
+RUN npm prune --production
+
+# Stage 3: Production image
+FROM node:20-slim AS runner
 WORKDIR /app
 
-# Set environment to production
-ENV NODE_ENV=production
+# Set NODE_ENV to production
+ENV NODE_ENV production
 
-# Copy built application from the build stage
-COPY --from=build /app/dist ./dist
+# Copy necessary artifacts from previous stages
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/package.json ./
+# Copy any other necessary files like static assets if they were outside src/ and not built into dist
+# e.g., COPY --from=builder /app/public ./public
 
-# Copy production dependencies configuration (needed if node_modules is pruned)
-# If bun produces a pruned node_modules, copy that instead. 
-# For simplicity now, we'll copy package.json and assume we might run `npm ci --omit=dev` or similar
-# Or, if bun doesn't need node_modules in production runtime and runs from compiled JS, skip node_modules copy.
-# Let's assume for now the compiled JS in dist/ runs directly via node without needing runtime node_modules
-# COPY --from=build /app/node_modules ./node_modules 
-COPY package.json .
-
-# Expose the port the application will run on (default 8080)
+# Expose the port the app runs on
 EXPOSE 8080
 
-# Define the command to run the application
-# Uses the `start` script from package.json which is `node dist/index.js`
-CMD ["bun", "run", "start"] 
+# Run the application
+# Use node directly to avoid npm overhead
+CMD ["node", "dist/index.js"] 

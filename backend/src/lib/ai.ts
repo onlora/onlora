@@ -179,7 +179,10 @@ export const generateContentWithLLM = async (
 export interface GeneratedImageData {
   base64Image?: string
   uint8ArrayImage?: Uint8Array
+  imageUrl?: string // If the AI service returns a URL directly
   mimeType?: string
+  seed?: string | number // Optional seed, if provided by the AI
+  revisedPrompt?: string // Optional revised prompt from the AI
   url?: string
 }
 
