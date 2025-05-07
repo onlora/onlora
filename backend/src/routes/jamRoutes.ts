@@ -311,4 +311,71 @@ jamApp.post(
   },
 )
 
+// Get messages for a specific Jam
+jamApp.get(
+  '/:jamId/messages',
+  requireAuthMiddleware,
+  async (c: Context<AuthenticatedContextEnv>) => {
+    const user = c.get('user')
+    const jamId = Number.parseInt(c.req.param('jamId'), 10)
+
+    if (Number.isNaN(jamId)) {
+      return c.json({ code: 400, message: 'Invalid Jam ID' }, 400)
+    }
+
+    if (!user || !user.id) {
+      // This should technically be caught by requireAuthMiddleware, but belts and suspenders
+      return c.json({ code: 401, message: 'Unauthorized' }, 401)
+    }
+
+    try {
+      // 1. Verify the jam exists and belongs to the user
+      const jam = await db
+        .select({ id: jams.id, userId: jams.userId })
+        .from(jams)
+        .where(sql`${jams.id} = ${jamId}`)
+        .limit(1)
+
+      if (!jam || jam.length === 0) {
+        return c.json({ code: 404, message: 'Jam session not found' }, 404)
+      }
+
+      if (jam[0].userId !== user.id) {
+        pinoLogger.warn(
+          {
+            requestedJamId: jamId,
+            actualUserId: user.id,
+            ownerUserId: jam[0].userId,
+          },
+          'User attempted to access messages for a jam they do not own.',
+        )
+        // Return 404 instead of 403 to avoid revealing existence
+        return c.json({ code: 404, message: 'Jam session not found' }, 404)
+      }
+
+      // 2. Fetch messages for the jam, ordered by creation time
+      const messages = await db
+        .select()
+        .from(messagesTable)
+        .where(sql`${messagesTable.jamId} = ${jamId}`)
+        .orderBy(sql`${messagesTable.createdAt} ASC`)
+
+      pinoLogger.info(
+        { userId: user.id, jamId, messageCount: messages.length },
+        `Fetched messages for jam ${jamId}`,
+      )
+      return c.json(messages, 200)
+    } catch (error) {
+      pinoLogger.error(
+        { err: error, userId: user.id, jamId },
+        'Error fetching messages for jam',
+      )
+      return c.json(
+        { code: 500, message: 'Internal server error fetching messages' },
+        500,
+      )
+    }
+  },
+)
+
 export default jamApp
