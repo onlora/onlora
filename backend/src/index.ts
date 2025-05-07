@@ -5,6 +5,7 @@ import { logger } from 'hono/logger'
 import { secureHeaders } from 'hono/secure-headers'
 import { type SSEStreamingApi, streamSSE } from 'hono/streaming'
 import pino from 'pino'
+import { auth } from './lib/auth'
 import { startJobQueue } from './lib/jobQueue.js'
 
 // Initialize Hono app
@@ -28,6 +29,24 @@ app.use(
   ),
 )
 app.use('*', secureHeaders()) // Basic security headers
+
+// --- Better Auth Route Handler ---
+// This must come before any generic catch-all or notFound handlers
+// if they might also match /api/auth/*
+app.all('/api/auth/*', async (c) => {
+  try {
+    // Pass the raw standard Request object to better-auth handler
+    const response = await auth.handler(c.req.raw)
+    // better-auth handler should return a standard Response object
+    return response
+  } catch (error) {
+    pinoLogger.error(
+      { err: error, path: c.req.path, provider: 'better-auth' },
+      'Error in better-auth handler',
+    )
+    return c.json({ message: 'Authentication error' }, 500)
+  }
+})
 
 // --- SSE Setup ---
 // Simple in-memory store for active SSE connections/tasks
@@ -73,6 +92,15 @@ app.get('/', (c) => {
 app.get('/health', (c) => {
   return c.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
+
+// Test route for user session (optional, for testing auth middleware later)
+// app.get('/api/me', authMiddleware, (c) => { // Assuming authMiddleware is created
+//   const user = c.get('user');
+//   return c.json({ user });
+// });
+
+// --- API Routes (Placeholder for actual application API routes) ---
+// Example: app.route('/api/posts', postsRouter); // Assuming postsRouter is defined elsewhere
 
 // Helper function for delay
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))

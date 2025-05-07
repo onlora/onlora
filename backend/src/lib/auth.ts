@@ -1,7 +1,13 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { db } from '../db'
-import { accounts, sessions, users, verifications } from '../db/auth-schema'
+import {
+  accounts as accountsAuthTable,
+  sessions as sessionsAuthTable,
+  users as usersAuthTable,
+  verifications as verificationsAuthTable,
+} from '../db/auth-schema'
+import { veTxns } from '../db/schema'
 
 // Check if the required environment variables are set
 if (!process.env.GOOGLE_CLIENT_ID) {
@@ -18,10 +24,10 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: 'pg', // Specify PostgreSQL
     schema: {
-      user: users,
-      account: accounts,
-      session: sessions,
-      verificationToken: verifications,
+      user: usersAuthTable,
+      account: accountsAuthTable,
+      session: sessionsAuthTable,
+      verificationToken: verificationsAuthTable,
     },
   }),
   socialProviders: {
@@ -34,6 +40,41 @@ export const auth = betterAuth({
   jwt: {
     secret: process.env.JWT_SECRET,
     options: { expiresIn: '24h' }, // As per mvp_tech_spec.md (JWT HS256, 24h)
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (createdUser, ctx) => {
+          // `createdUser` is the user object just created by better-auth.
+          // It should have at least `id`, `email`, `name`.
+          // Our `users` table has a default for `vibe_energy`,
+          // so no explicit update needed for that unless defaults aren't firing as expected.
+          try {
+            // Create a VE transaction for signup bonus
+            // Ensure createdUser.id is a string as expected by our schema if it is text('id')
+            const userId = String(createdUser.id)
+
+            await db.insert(veTxns).values({
+              userId: userId,
+              delta: 50,
+              reason: 'signup',
+              // ref_id might be null or point to the user_id itself if appropriate
+            })
+            console.log(
+              `Successfully processed post-user-creation hook for ${userId}`,
+            )
+          } catch (error) {
+            console.error(
+              `Error in user.create.after hook for user ID ${createdUser.id}:`,
+              error,
+            )
+            // Decide if this error should throw and potentially roll back the user creation
+            // or just be logged. For now, logging.
+          }
+        },
+      },
+      // We might also need an 'update' hook if user profile data from provider needs mapping to our custom fields
+    },
   },
   // Example of database hooks if needed later for custom logic on user creation:
   // databaseHooks: {
