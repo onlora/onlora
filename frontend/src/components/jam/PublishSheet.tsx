@@ -11,9 +11,12 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Textarea } from '@/components/ui/textarea'
 import type { MessageImage } from '@/lib/api/jamApi' // Assuming this type exists for image data
 import { useState } from 'react'
+
+export type PostVisibility = 'public' | 'private'
 
 interface PublishSheetProps {
   isOpen: boolean
@@ -23,8 +26,10 @@ interface PublishSheetProps {
     title: string
     description: string
     tags: string[]
+    visibility: PostVisibility // Added visibility
     communityId?: string // Optional for now
   }) => void
+  isSubmitting?: boolean
 }
 
 export function PublishSheet({
@@ -32,10 +37,12 @@ export function PublishSheet({
   onOpenChange,
   selectedImages,
   onPublish,
+  isSubmitting,
 }: PublishSheetProps) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [tags, setTags] = useState('') // Comma-separated string
+  const [visibility, setVisibility] = useState<PostVisibility>('private') // Default to private
 
   const handlePublish = () => {
     // Basic validation (can be expanded)
@@ -51,6 +58,7 @@ export function PublishSheet({
         .split(',')
         .map((tag) => tag.trim())
         .filter((tag) => tag), // Split and clean tags
+      visibility, // Pass visibility
     })
     // Optionally close dialog on publish, or let parent handle it
     // onOpenChange(false);
@@ -102,8 +110,8 @@ export function PublishSheet({
               placeholder="My Awesome Creation"
             />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="description" className="text-right">
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label htmlFor="description" className="text-right pt-2">
               Description
             </Label>
             <Textarea
@@ -127,6 +135,29 @@ export function PublishSheet({
               placeholder="e.g., fantasy, abstract, vibrant"
             />
             {/* Future: Replace with a dedicated TagInput component */}
+          </div>
+          <div className="grid grid-cols-4 items-center gap-4">
+            <Label className="text-right">Visibility</Label>
+            <RadioGroup
+              value={visibility}
+              onValueChange={(value: string) =>
+                setVisibility(value as PostVisibility)
+              }
+              className="col-span-3 flex items-center space-x-4"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="private" id="visibility-private" />
+                <Label htmlFor="visibility-private" className="font-normal">
+                  Private
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="public" id="visibility-public" />
+                <Label htmlFor="visibility-public" className="font-normal">
+                  Public
+                </Label>
+              </div>
+            </RadioGroup>
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="community" className="text-right">
@@ -158,9 +189,11 @@ export function PublishSheet({
           <Button
             type="button"
             onClick={handlePublish}
-            disabled={selectedImages.length === 0 || !title.trim()}
+            disabled={
+              isSubmitting || selectedImages.length === 0 || !title.trim()
+            }
           >
-            Publish
+            {isSubmitting ? 'Publishing...' : 'Publish'}
           </Button>
         </DialogFooter>
       </DialogContent>

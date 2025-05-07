@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm'
 import {
+  type AnyPgColumn,
   bigint,
   bigserial,
   boolean,
@@ -8,6 +9,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  serial,
   text,
   timestamp,
 } from 'drizzle-orm/pg-core'
@@ -62,23 +64,44 @@ export const images = pgTable('images', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
+export const jamSessions = pgTable('jam_sessions', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id')
+    .references(() => users.id, { onDelete: 'cascade' })
+    .notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+  // title: text('title'), // Optional title for a jam session
+  // settings: jsonb('settings'), // Could store things like model, aspect ratio etc.
+})
+
 export const posts = pgTable('posts', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  id: serial('id').primaryKey(),
   authorId: text('author_id').references(() => users.id, {
     onDelete: 'set null',
-  }),
+  }), // Can be null if author deletes account
   title: text('title'),
-  bodyMd: text('body_md'),
-  tags: text('tags').array(),
-  coverImg: text('cover_img'),
-  visibility: visibilityEnum('visibility').default('private'),
-  parentPostId: bigint('parent_post_id', { mode: 'number' }),
-  rootPostId: bigint('root_post_id', { mode: 'number' }),
+  bodyMd: text('body_md'), // Markdown body
+  tags: text('tags').array(), // Array of strings for tags
+  visibility: visibilityEnum('visibility').default('public'),
+  coverImg: text('cover_img_url'), // JS property is coverImg, SQL column is cover_img_url
+  jamSessionId: integer('jam_session_id').references(() => jamSessions.id, {
+    onDelete: 'set null',
+  }), // Optional link to original jam session
+  likeCount: integer('like_count').default(0).notNull(),
+  commentCount: integer('comment_count').default(0).notNull(),
+  remixCount: integer('remix_count').default(0).notNull(),
+  viewCount: integer('view_count').default(0).notNull(),
+  parentPostId: integer('parent_post_id').references(
+    (): AnyPgColumn => posts.id,
+    { onDelete: 'cascade' },
+  ),
+  rootPostId: integer('root_post_id').references((): AnyPgColumn => posts.id, {
+    onDelete: 'cascade',
+  }),
   generation: integer('generation').default(0),
-  remixCount: integer('remix_count').default(0),
-  likeCount: integer('like_count').default(0),
-  commentCount: integer('comment_count').default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 })
 
 export const postsRelations = relations(posts, ({ one, many }) => ({
@@ -96,6 +119,7 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
   }),
   likes: many(likes),
   comments: many(comments),
+  postImages: many(postImages),
 }))
 
 export const likes = pgTable(
@@ -205,11 +229,12 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   }),
 }))
 
-export const imagesRelations = relations(images, ({ one }) => ({
+export const imagesRelations = relations(images, ({ one, many }) => ({
   jam: one(jams, {
     fields: [images.jamId],
     references: [jams.id],
   }),
+  postImages: many(postImages),
 }))
 
 // Note: Drizzle Kit should infer FK for posts.parentPostId from its name and type,
@@ -290,4 +315,35 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
     references: [comments.id],
     relationName: 'notificationsForComment',
   }),
+}))
+
+// Table to link Posts with their Images (Many-to-Many)
+export const postImages = pgTable('post_images', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  postId: bigint('post_id', { mode: 'number' })
+    .notNull()
+    .references(() => posts.id, { onDelete: 'cascade' }),
+  imageId: bigint('image_id', { mode: 'number' })
+    .notNull()
+    .references(() => images.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+})
+
+export const postImagesRelations = relations(postImages, ({ one }) => ({
+  post: one(posts, {
+    fields: [postImages.postId],
+    references: [posts.id],
+  }),
+  image: one(images, {
+    fields: [postImages.imageId],
+    references: [images.id],
+  }),
+}))
+
+export const jamSessionsRelations = relations(jamSessions, ({ one, many }) => ({
+  user: one(users, {
+    fields: [jamSessions.userId],
+    references: [users.id],
+  }),
+  messages: many(messages),
 }))

@@ -6,6 +6,7 @@ import { ImageStrip } from '@/components/jam/ImageStrip' // Import the real comp
 import { type ImageSize, JamToolbar } from '@/components/jam/JamToolbar' // Import Toolbar and ImageSize type
 import { MessageList } from '@/components/jam/MessageList' // Import the real component
 import { PublishSheet } from '@/components/jam/PublishSheet'
+import type { PostVisibility } from '@/components/jam/PublishSheet' // Import PostVisibility type
 import {
   type ApiErrorResponse,
   type GenerateImagePayload,
@@ -15,6 +16,7 @@ import {
   generateImageForJam,
   getJamMessages,
 } from '@/lib/api/jamApi' // Import the API function
+import { type CreatePostPayload, createPost } from '@/lib/api/postApi' // Import createPost
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query' // Import useMutation, useQueryClient
 import { useEffect, useMemo, useRef, useState } from 'react' // Import useMemo and useRef
 import { toast } from 'sonner' // Import toast for notifications
@@ -341,18 +343,58 @@ export default function JamPage({ params }: JamPageProps) {
     }
   }
 
+  // --- Publish Post Mutation --- //
+  const { mutate: submitPost, isPending: isPublishingPost } = useMutation<
+    // Define types for useMutation explicitly
+    import('@/lib/api/postApi').CreatePostResponse, // Success response type
+    Error, // Error type
+    CreatePostPayload // Variables type for the mutation function
+  >({
+    mutationFn: createPost, // The function that performs the API call
+    onSuccess: (responseData, variables) => {
+      // variables here is the CreatePostPayload
+      toast.success(
+        `Post '${variables.title}' published! ID: ${responseData.postId}`,
+      )
+      setIsPublishSheetOpen(false)
+      setSelectedImageIds(new Set())
+      // TODO: Invalidate relevant queries (e.g., user's posts, feed)
+      // queryClient.invalidateQueries({ queryKey: ['userPosts'] });
+      // TODO: Optionally redirect to the new post or a gallery page
+      // router.push(`/posts/${responseData.postId}`);
+    },
+    onError: (
+      error: Error & Partial<import('@/lib/api/jamApi').ApiErrorResponse>,
+    ) => {
+      console.error('Error publishing post:', error)
+      toast.error(`Failed to publish post: ${error.message || 'Unknown error'}`)
+      // Optionally, do not close the sheet on error to allow retries/corrections
+      // setIsPublishSheetOpen(false);
+    },
+  })
+
   const handlePublishSubmit = (data: {
     title: string
     description: string
     tags: string[]
+    visibility: PostVisibility
   }) => {
-    // TODO: Implement actual API call to publish
-    console.log('Publishing data:', { ...data, images: imagesToPublish })
-    toast.success(
-      `'${data.title}' submitted for publishing with ${imagesToPublish.length} image(s)!`,
-    )
-    setIsPublishSheetOpen(false)
-    setSelectedImageIds(new Set()) // Clear selection after successful publish submission
+    if (imagesToPublish.length === 0) {
+      toast.error('No images selected for publishing.')
+      return
+    }
+
+    const payload: CreatePostPayload = {
+      title: data.title,
+      description: data.description,
+      tags: data.tags,
+      visibility: data.visibility,
+      imageIds: imagesToPublish.map((img) => img.id),
+      jamId: Number.parseInt(jamId, 10), // Assuming jamId should be included
+    }
+
+    console.log('Submitting post with payload:', payload)
+    submitPost(payload) // Call the mutation
   }
 
   return (
@@ -389,6 +431,7 @@ export default function JamPage({ params }: JamPageProps) {
         onOpenChange={setIsPublishSheetOpen}
         selectedImages={imagesToPublish}
         onPublish={handlePublishSubmit}
+        isSubmitting={isPublishingPost}
       />
     </div>
   )

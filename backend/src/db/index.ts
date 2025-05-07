@@ -30,3 +30,4 @@ export const db = drizzle(pool, {
   schema: combinedSchema,
   logger: process.env.NODE_ENV !== 'production',
 }) // Enable logger for dev
+ 
