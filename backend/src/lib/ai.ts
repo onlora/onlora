@@ -118,26 +118,28 @@ export const generateContentWithLLM = async (
       `Requesting content generation with ${modelProvider}/${modelId} (generateText), prompt: "${prompt}"`,
     )
 
-    let finalGenerateTextProviderOptions:
-      | Record<string, JSONValue>
+    let providerOptionsForCall:
+      | Record<string, Record<string, JSONValue>>
       | undefined = undefined
+
     if (modelProvider === 'google' && providerOptions?.google) {
-      finalGenerateTextProviderOptions = providerOptions.google as Record<
-        string,
-        JSONValue
-      >
+      if (Object.keys(providerOptions.google).length > 0) {
+        providerOptionsForCall = {
+          google: providerOptions.google as Record<string, JSONValue>,
+        }
+      }
     } else if (modelProvider === 'openai' && providerOptions?.openai) {
-      finalGenerateTextProviderOptions = providerOptions.openai as Record<
-        string,
-        JSONValue
-      >
+      // OpenAIProviderGenTextOptions is Record<string, never>, so it should be an empty object {}.
+      // An empty object IS a valid Record<string, JSONValue>.
+      providerOptionsForCall = {
+        openai: providerOptions.openai as Record<string, JSONValue>,
+      }
     }
 
     const result = await generateText({
       model: model,
       messages: messages,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      providerOptions: finalGenerateTextProviderOptions as any,
+      providerOptions: providerOptionsForCall,
     })
 
     const generatedFiles: GeneratedFile[] = []
@@ -175,9 +177,9 @@ export const generateContentWithLLM = async (
 // --- New Image Generation Function using experimental_generateImage ---
 
 export interface GeneratedImageData {
-  base64?: string
-  uint8Array?: Uint8Array
-  format?: string
+  base64Image?: string
+  uint8ArrayImage?: Uint8Array
+  mimeType?: string
   url?: string
 }
 
@@ -288,26 +290,29 @@ export const generateImageWithDedicatedModel = async (
     // result.image is ImagePart if n = 1 and model generates single
     // We'll standardize to always return an array in our GenerateImageResult
     let sdkImages: ImagePart[] = []
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const resultAsAny = result as any // Use 'any' to inspect the raw structure due to linter confusion
 
-    if (resultAsAny && typeof resultAsAny === 'object') {
-      if ('images' in resultAsAny && Array.isArray(resultAsAny.images)) {
-        sdkImages = resultAsAny.images as unknown as ImagePart[] // Force cast, assuming SDK returns ImagePart[]
-      } else if ('image' in resultAsAny && resultAsAny.image) {
-        sdkImages = [resultAsAny.image as unknown as ImagePart] // Force cast, assuming SDK returns ImagePart
+    if (result) {
+      if (result.images && result.images.length > 0) {
+        sdkImages = result.images as unknown as ImagePart[]
+      } else if (result.image) {
+        sdkImages = [result.image as unknown as ImagePart]
       }
     }
 
-    // DIAGNOSTIC: Using 'any' for 'img' to bypass linter & trust runtime structure based on docs
-    const processedImages: GeneratedImageData[] = sdkImages.map((img: any) => {
-      // logger.info({ msg: 'Inspecting ImagePart structure', imageObject: JSON.stringify(img) });
-      return {
-        base64: img.base64,
-        uint8Array: img.uint8Array,
-        format: img.format, // This might or might not exist depending on SDK version and model response
-      }
-    })
+    const processedImages: GeneratedImageData[] = sdkImages.map(
+      (img: ImagePart): GeneratedImageData => {
+        const genImgData: GeneratedImageData = {}
+        if (typeof img.image === 'string') {
+          genImgData.base64Image = img.image
+        } else if (img.image instanceof Uint8Array) {
+          genImgData.uint8ArrayImage = img.image
+        }
+        if (img.mimeType) {
+          genImgData.mimeType = img.mimeType
+        }
+        return genImgData
+      },
+    )
 
     logger.info(
       `Successfully generated ${processedImages.length} image(s) (via experimental_generateImage).`,
@@ -315,7 +320,7 @@ export const generateImageWithDedicatedModel = async (
 
     return {
       images: processedImages,
-      warnings: resultAsAny.warnings as SDKWarning[] | undefined,
+      warnings: result.warnings as SDKWarning[] | undefined,
       providerResponse: result,
     }
   } catch (error: unknown) {
