@@ -35,7 +35,9 @@ import {
 } from '@tanstack/react-query'
 import {
   Bell,
+  Bookmark,
   CheckCheck,
+  Coins,
   LayoutGrid,
   LogOut,
   Search,
@@ -197,7 +199,15 @@ export default function Header() {
         <Link href="/" className="mr-6 flex items-center space-x-2">
           <span className="font-bold sm:inline-block">onlora</span>
         </Link>
-        <nav className="flex flex-1 items-center space-x-6 text-sm font-medium" />
+        <nav className="flex flex-1 items-center space-x-6 text-sm font-medium">
+          <Link
+            href="/feed"
+            className="text-foreground/70 hover:text-foreground transition-colors"
+          >
+            Feed
+          </Link>
+          {/* Add other primary navigation links here if needed */}
+        </nav>
 
         <div className="flex-1 flex justify-center px-4">
           <form
@@ -256,6 +266,18 @@ export default function Header() {
                   <Link href="/gallery">
                     <LayoutGrid className="mr-2 h-4 w-4" />
                     My Gallery
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/profile/bookmarks">
+                    <Bookmark className="mr-2 h-4 w-4" />
+                    Bookmarks
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link href="/profile/ve-history">
+                    <Coins className="mr-2 h-4 w-4" />
+                    VE History
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />

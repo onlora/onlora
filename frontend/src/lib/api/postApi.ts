@@ -55,17 +55,16 @@ export interface PostDetails {
   likeCount: number | null
   commentCount: number | null
   remixCount: number | null
-  viewCount?: number | null // viewCount is correctly here
-  bookmarkCount?: number | null // Added bookmarkCount (optional for safety)
-  parentPostId: number | null // ID of the parent post, if this is a remix
+  viewCount?: number | null
+  bookmarkCount?: number | null
+  parentPostId: number | null
   rootPostId: number | null
   generation: number | null
-  author: PostAuthor | null // The author object
-  images: PostImage[] // Array of images associated with the post
-  isLiked?: boolean // Whether the current user has liked this post
-  isBookmarked: boolean // ADDED: Whether the current user has bookmarked this post
+  author: PostAuthor | null
+  images: PostImage[]
+  isLiked?: boolean
+  isBookmarked?: boolean // Ensure this is not optional if backend always sends it
   parentPost?: {
-    // This is where parentPost should be
     id: number
     title: string | null
     author: {
@@ -93,8 +92,8 @@ export async function getPostDetails(postId: string): Promise<PostDetails> {
 
 // Type for the response of the like/unlike endpoint
 export interface ToggleLikeResponse {
-  didLike: boolean // True if the user now likes the post, false if they unliked it
-  likeCount: number | null // The new like count
+  liked: boolean // Changed from didLike to match backend more closely if it returns 'liked'
+  likeCount: number | null
 }
 
 /**
@@ -112,25 +111,40 @@ export async function toggleLikePost(
   })
 }
 
-// --- Bookmark Post --- //
+// --- Bookmark/Unbookmark Post --- //
 
-// Response type for bookmark toggle
-export interface ToggleBookmarkResponse {
-  didBookmark: boolean
-  bookmarkCount: number | null // Updated count
+// Response type for bookmark actions
+export interface BookmarkActionResponse {
+  bookmarked: boolean // True if the post is now bookmarked by the user
+  bookmarkCount: number | null // The new bookmark count of the post
 }
 
 /**
- * Toggles the bookmark status for a post.
+ * Bookmarks a post.
  */
-export async function toggleBookmarkPost(
+export async function bookmarkPost(
   postId: string,
-): Promise<ToggleBookmarkResponse> {
+): Promise<BookmarkActionResponse> {
   if (!postId || Number.isNaN(Number(postId))) {
-    throw new Error('Invalid Post ID provided.')
+    throw new Error('Invalid Post ID provided for bookmarking.')
   }
-  return apiClient<ToggleBookmarkResponse>(`/posts/${postId}/bookmark`, {
+  return apiClient<BookmarkActionResponse>(`/posts/${postId}/bookmark`, {
     method: 'POST',
+    credentials: 'include',
+  })
+}
+
+/**
+ * Unbookmarks a post.
+ */
+export async function unbookmarkPost(
+  postId: string,
+): Promise<BookmarkActionResponse> {
+  if (!postId || Number.isNaN(Number(postId))) {
+    throw new Error('Invalid Post ID provided for unbookmarking.')
+  }
+  return apiClient<BookmarkActionResponse>(`/posts/${postId}/bookmark`, {
+    method: 'DELETE',
     credentials: 'include',
   })
 }
@@ -194,5 +208,37 @@ export async function updateMyPost(
     method: 'PATCH',
     credentials: 'include',
     body: payload,
+  })
+}
+
+// --- Remix Tree --- //
+
+export interface RemixTreeNode {
+  id: number
+  title: string | null
+  author: PostAuthor | null // Re-use PostAuthor type
+  parentId: number | null
+  coverImg: string | null
+  createdAt: string | null // ISO Date string
+  remixes: RemixTreeNode[] // Recursive definition for children
+}
+
+export interface RemixTreeResponse {
+  currentPostId: number
+  lineage: RemixTreeNode[] // Path from root to currentPost's parent
+  tree: RemixTreeNode // The current post as the root of its own remix sub-tree
+}
+
+/**
+ * Fetches the remix tree (lineage and descendants) for a given post.
+ */
+export async function getRemixTree(postId: string): Promise<RemixTreeResponse> {
+  if (!postId || Number.isNaN(Number(postId))) {
+    throw new Error('Invalid Post ID provided for fetching remix tree.')
+  }
+  // Assuming this endpoint might require authentication to see full details
+  // or based on post visibility, so include credentials.
+  return apiClient<RemixTreeResponse>(`/posts/${postId}/remix-tree`, {
+    credentials: 'include',
   })
 }

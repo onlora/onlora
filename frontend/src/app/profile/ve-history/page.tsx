@@ -1,143 +1,219 @@
 'use client'
 
-import ProtectedPage from '@/components/auth/ProtectedPage'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { type VeHistoryPage, getMyVeHistory } from '@/lib/api/userApi'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  type VeHistoryPage,
+  type VeTransactionItem,
+  getMyVeHistory,
+} from '@/lib/api/userApi'
 import { useSession } from '@/lib/authClient'
+import { cn } from '@/lib/utils'
 import { type InfiniteData, useInfiniteQuery } from '@tanstack/react-query'
-import { formatDistanceToNowStrict } from 'date-fns'
-import { ArrowDownRight, ArrowLeft, ArrowUpRight, Loader2 } from 'lucide-react'
-import Link from 'next/link'
+import { Info, Loader2, ServerCrash } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { useEffect, useMemo } from 'react'
 
-const HISTORY_PER_PAGE = 25
+const VE_HISTORY_PAGE_SIZE = 20
 
-export default function VeHistoryDisplayPage() {
-  const { data: session } = useSession()
+function formatReason(reason: string | null, refId: number | null): string {
+  if (!reason) return 'Unknown reason'
+  // Could expand this to be more descriptive based on reason codes
+  return reason
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+export default function VeHistoryPage() {
+  const { data: session, isPending: isAuthLoading } = useSession()
   const router = useRouter()
-  const userId = session?.user?.id
+
+  const isAuthenticated = useMemo(() => {
+    if (isAuthLoading) return false
+    return !!session?.user
+  }, [isAuthLoading, session])
+
+  useEffect(() => {
+    if (!isAuthLoading && !isAuthenticated) {
+      router.push('/api/auth/signin/google?callbackUrl=/profile/ve-history')
+    }
+  }, [isAuthenticated, isAuthLoading, router])
 
   const {
-    data: historyData,
+    data,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isError,
     error,
   } = useInfiniteQuery<
     VeHistoryPage,
     Error,
-    InfiniteData<VeHistoryPage>,
-    (string | undefined)[],
+    InfiniteData<VeHistoryPage, number>,
+    [string],
     number
   >({
-    queryKey: ['myVeHistoryPage', userId],
-    queryFn: ({ pageParam = 0 }) =>
-      getMyVeHistory({ limit: HISTORY_PER_PAGE, offset: pageParam }),
+    queryKey: ['myVeHistory'],
+    queryFn: async ({ pageParam = 0 }) => {
+      return getMyVeHistory({
+        limit: VE_HISTORY_PAGE_SIZE,
+        offset: pageParam,
+      })
+    },
     initialPageParam: 0,
-    getNextPageParam: (lastPage) =>
-      lastPage.pageInfo.hasNextPage ? lastPage.pageInfo.nextOffset : undefined,
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.pageInfo) return undefined
+      const { nextOffset, hasNextPage } = lastPage.pageInfo
+      return hasNextPage ? nextOffset : undefined
+    },
+    enabled: isAuthenticated,
+    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
   })
 
-  const allTransactions = historyData?.pages.flatMap((page) => page.items) ?? []
-
-  const formatReason = (reason: string | null): string => {
-    if (!reason) return 'Unknown reason'
-    return reason.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) // Capitalize words
+  if (isAuthLoading) {
+    return (
+      <div className="p-4 md:p-6">
+        <h1 className="text-2xl font-semibold mb-4">VE History</h1>
+        <div className="flex justify-center items-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="ml-2 text-muted-foreground">
+            Checking authentication...
+          </p>
+        </div>
+      </div>
+    )
   }
 
+  if (!isAuthenticated) {
+    // router.push should have handled this, but as a fallback
+    return null
+  }
+
+  if (isLoading) {
+    return (
+      <div className="p-4 md:p-6">
+        <h1 className="text-2xl font-semibold mb-6">VE History</h1>
+        <div className="space-y-3">
+          {[...Array(10)].map((_, i) => (
+            <div
+              key={`skel-ve-${i}`}
+              className="flex justify-between items-center p-3 border rounded-md"
+            >
+              <div className="space-y-1.5">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+              <Skeleton className="h-5 w-12" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'An unknown error occurred'
+    return (
+      <div className="p-4 md:p-6">
+        <h1 className="text-2xl font-semibold mb-4">VE History</h1>
+        <Alert variant="destructive">
+          <ServerCrash className="h-4 w-4" />
+          <AlertTitle>Error Loading VE History</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
+  const allTransactions = data?.pages.flatMap((page) => page.items ?? []) ?? []
+
   return (
-    <ProtectedPage>
-      <div className="container mx-auto max-w-3xl py-8">
-        <div className="mb-6">
-          <Button variant="outline" onClick={() => router.push('/profile')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Profile
+    <div className="p-4 md:p-6">
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold">VE History</h1>
+        <p className="text-muted-foreground">
+          Track your Vibe Energy earnings and spending.
+        </p>
+      </header>
+
+      {allTransactions.length === 0 && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>No Transactions Yet</AlertTitle>
+          <AlertDescription>
+            Your VE transaction history is empty. Start interacting with the
+            platform to earn VE!
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {allTransactions.length > 0 && (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Amount</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead className="text-right">Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {allTransactions.map((tx: VeTransactionItem) => (
+                <TableRow key={tx.id}>
+                  <TableCell
+                    className={cn(
+                      'font-medium',
+                      tx.delta >= 0 ? 'text-green-600' : 'text-red-600',
+                    )}
+                  >
+                    {tx.delta >= 0 ? `+${tx.delta}` : tx.delta} VE
+                  </TableCell>
+                  <TableCell>{formatReason(tx.reason, tx.refId)}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {new Date(tx.createdAt).toLocaleDateString()} -{' '}
+                    {new Date(tx.createdAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {hasNextPage && (
+        <div className="text-center mt-8">
+          <Button
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+            variant="outline"
+            size="lg"
+          >
+            {isFetchingNextPage ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading more...
+              </>
+            ) : (
+              'Load More Transactions'
+            )}
           </Button>
         </div>
-        <h1 className="text-3xl font-bold mb-6">Vibe Energy History</h1>
-        <Card>
-          <CardHeader>
-            <CardTitle>Transaction Log</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {isLoading && (
-              <div className="p-6 space-y-4">
-                {[...Array(5)].map((_, i) => (
-                  <Skeleton key={`skel-ve-txn-${i}`} className="h-12 w-full" />
-                ))}
-              </div>
-            )}
-            {error && (
-              <div className="p-6 text-center text-destructive">
-                Failed to load history: {error.message}
-              </div>
-            )}
-            {!isLoading && !error && allTransactions.length === 0 && (
-              <div className="p-6 text-center text-muted-foreground">
-                You have no Vibe Energy transactions yet.
-              </div>
-            )}
-            {!isLoading && !error && allTransactions.length > 0 && (
-              <ul className="divide-y divide-border">
-                {allTransactions.map((tx) => (
-                  <li
-                    key={tx.id}
-                    className="p-4 flex justify-between items-center"
-                  >
-                    <div>
-                      <p className="font-medium">{formatReason(tx.reason)}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatDistanceToNowStrict(new Date(tx.createdAt), {
-                          addSuffix: true,
-                        })}
-                        {/* Optionally add link to refId if applicable */}
-                        {tx.refId && (
-                          <Link
-                            href={`/posts/${tx.refId}`}
-                            className="ml-2 hover:underline text-primary"
-                            title={`View related post ${tx.refId}`}
-                          >
-                            (Ref: {tx.refId})
-                          </Link>
-                        )}
-                      </p>
-                    </div>
-                    <div
-                      className={`flex items-center font-semibold ${tx.delta >= 0 ? 'text-green-600' : 'text-red-600'}`}
-                    >
-                      {tx.delta >= 0 ? (
-                        <ArrowUpRight className="h-4 w-4 mr-1" />
-                      ) : (
-                        <ArrowDownRight className="h-4 w-4 mr-1" />
-                      )}
-                      {tx.delta >= 0 ? `+${tx.delta}` : tx.delta}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-        {hasNextPage && (
-          <div className="mt-6 text-center">
-            <Button
-              onClick={() => fetchNextPage()}
-              disabled={isFetchingNextPage}
-              variant="outline"
-            >
-              {isFetchingNextPage && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Load More History
-            </Button>
-          </div>
-        )}
-      </div>
-    </ProtectedPage>
+      )}
+    </div>
   )
 }

@@ -17,6 +17,7 @@ import {
 import { comments as commentsSchema } from '../db/schema' // Import schema explicitly for typing
 import {
   type AuthenticatedContextEnv,
+  optionalAuthMiddleware,
   requireAuthMiddleware,
 } from '../middleware/auth' // Changed to AuthenticatedContextEnv
 
@@ -61,9 +62,57 @@ const postCloneDataSchema = z.object({
   // Potentially a snippet of bodyMd if desired
 })
 
-// Define the specific Environment for this router, including Variables and potential ValidatedData shapes
-// Note: ValidatedData might not be strictly necessary here if we parse manually inside handlers
-interface PostRoutesAppEnv extends AuthenticatedContextEnv {}
+// Define a type for individual tree nodes
+interface RemixNodeSelf {
+  id: number
+  title: string | null
+  author: {
+    id: string
+    username: string | null
+    name: string | null
+    image: string | null
+  } | null
+  parentId: number | null
+  coverImg: string | null
+  createdAt: string | null // Expect ISO string or null
+  remixes: RemixNodeSelf[]
+}
+
+const RemixTreeNodeSchema: z.ZodType<RemixNodeSelf> = z.lazy(() =>
+  z.object({
+    id: z.number(),
+    title: z.string().nullable(),
+    author: z
+      .object({
+        id: z.string(),
+        username: z.string().nullable(),
+        name: z.string().nullable(),
+        image: z.string().nullable(),
+      })
+      .nullable(),
+    parentId: z.number().nullable(),
+    coverImg: z.string().nullable(),
+    createdAt: z.string().nullable(), // Expect ISO string or null
+    remixes: z.array(RemixTreeNodeSchema),
+  }),
+)
+
+// Define the overall API response schema
+const RemixTreeResponseSchema = z.object({
+  currentPostId: z.number(),
+  lineage: z.array(RemixTreeNodeSchema),
+  tree: RemixTreeNodeSchema,
+})
+
+// Define the specific Environment for this router
+interface PostRoutesAppEnv extends AuthenticatedContextEnv {
+  Variables: AuthenticatedContextEnv['Variables'] // Explicitly carry over Variables
+  ValidatedData: {
+    param: z.infer<typeof postIdParamSchema>
+    json: z.infer<typeof createPostSchema> | z.infer<typeof updatePostSchema> // Union of possible JSON schemas
+    // Add other validation types like 'query' if used
+  }
+}
 
 const postRoutes = new Hono<PostRoutesAppEnv>()
 
@@ -89,21 +138,21 @@ interface PostQueryResult {
   author: {
     id: string
     username: string
-    name: string | null // Assuming name is nullable based on schema
+    name: string | null
     image: string | null
-  } | null // Author relation might be null if authorId is null
+  } | null
   postImages: Array<{
-    id: number
-    postId: number
-    imageId: number
-    createdAt: Date | null
+    id: number // id of the post_images record
+    // postId: number // Redundant as it's part of the main post
+    imageId: number // id of the actual image
+    // createdAt: Date | null // Timestamp of the post_images record
     image: {
       id: number
       url: string
-    } | null // Image relation might be null
+      // We could add prompt, model from images table if needed here
+    } | null // The actual image object from the images table
   }>
   parentPost?: {
-    // Added parentPost to the result type
     id: number
     title: string | null
     author: {
@@ -113,6 +162,10 @@ interface PostQueryResult {
     } | null
   } | null
   bookmarkCount: number | null
+  isLiked?: boolean
+  isBookmarked?: boolean
+  // This will be the transformed array of actual image objects for the client
+  imagesForClient?: Array<{ id: number; url: string }>
 }
 
 // --- Helper Type for Comment Query Result ---
@@ -286,62 +339,60 @@ postRoutes.post(
   },
 )
 
-// GET /api/posts/:postId - Fetch a single post
+// GET /api/posts/:postId - Get details for a single post
 postRoutes.get(
   '/:postId',
-  // Keep zValidator for params, but parse manually
+  optionalAuthMiddleware,
   zValidator('param', postIdParamSchema, (result, c) => {
     if (!result.success) {
-      return c.json(
-        { error: 'Invalid Post ID format', details: result.error.flatten() },
-        400,
-      )
+      return c.json({ error: 'Invalid post ID format' }, 400)
     }
   }),
-  async (c: Context<PostRoutesAppEnv>) => {
-    const user = c.get('user')
+  async (c) => {
+    const { postId } = c.req.valid('param')
+    const currentUser = c.get('user')
 
     try {
-      const params = postIdParamSchema.parse(c.req.param())
-      const postId = params.postId
+      // Atomically increment view_count using SQL
+      // Note: .returning() might not be directly supported in all simple update scenarios or without specific driver features.
+      // We will fetch the post separately after updating.
+      await db
+        .update(posts)
+        .set({ viewCount: sql`${posts.viewCount} + 1` })
+        .where(eq(posts.id, postId))
 
-      // Increment view_count.
-      try {
-        await db
-          .update(posts)
-          .set({ viewCount: sql`${posts.viewCount} + 1` })
-          .where(eq(posts.id, postId))
-      } catch (incrementError) {
-        console.error(
-          `Error incrementing view count for post ${postId}:`,
-          incrementError,
-        )
-      }
-
+      // Fetch the post with all relations
       const postData = (await db.query.posts.findFirst({
         where: eq(posts.id, postId),
         with: {
           author: {
-            columns: { id: true, name: true, image: true, username: true },
+            columns: {
+              id: true,
+              username: true,
+              name: true,
+              image: true,
+            },
           },
           postImages: {
             with: {
-              image: { columns: { id: true, url: true } },
+              image: {
+                // This is the image object from the 'images' table
+                columns: { id: true, url: true },
+              },
             },
-            columns: { imageId: true },
+            // Select from 'post_images' join table
+            columns: { id: true, imageId: true },
           },
           parentPost: {
-            // Fetch parentPost details
             columns: { id: true, title: true },
             with: {
               author: {
-                // And its author
                 columns: { id: true, username: true, name: true },
               },
             },
           },
         },
-        // Include bookmarkCount in the columns fetched
+        // Explicitly list all columns from the posts table we need
         columns: {
           id: true,
           title: true,
@@ -358,67 +409,58 @@ postRoutes.get(
           parentPostId: true,
           rootPostId: true,
           generation: true,
-          bookmarkCount: true, // Fetch bookmarkCount
+          bookmarkCount: true,
         },
-      })) as PostQueryResult | undefined
+      })) as
+        | Omit<PostQueryResult, 'isLiked' | 'isBookmarked' | 'imagesForClient'>
+        | undefined
+      // Cast to a version of PostQueryResult that doesn't yet have the client-specific fields
 
       if (!postData) {
         return c.json({ error: 'Post not found' }, 404)
       }
 
-      if (
-        postData.visibility === 'private' &&
-        (!user || user.id !== postData.authorId)
-      ) {
-        return c.json(
-          { error: 'Forbidden: You do not have permission to view this post' },
-          403,
-        )
-      }
-
-      let isLikedByCurrentUser = false
-      let isBookmarkedByCurrentUser = false
-
-      if (user?.id) {
+      let isLiked = false
+      let isBookmarked = false
+      if (currentUser?.id) {
         const likeRecord = await db.query.likes.findFirst({
-          where: and(eq(likes.postId, postId), eq(likes.userId, user.id)),
+          where: and(
+            eq(likes.postId, postId),
+            eq(likes.userId, currentUser.id),
+          ),
           columns: { userId: true },
         })
-        isLikedByCurrentUser = !!likeRecord
+        isLiked = !!likeRecord
 
-        // Check for bookmark
         const bookmarkRecord = await db.query.bookmarks.findFirst({
           where: and(
             eq(bookmarks.postId, postId),
-            eq(bookmarks.userId, user.id),
+            eq(bookmarks.userId, currentUser.id),
           ),
-          columns: { userId: true }, // Select any column
+          columns: { userId: true },
         })
-        isBookmarkedByCurrentUser = !!bookmarkRecord
+        isBookmarked = !!bookmarkRecord
       }
 
-      const responseData = {
-        ...postData,
-        images: postData.postImages.map((pi) => pi.image).filter(Boolean),
-        isLiked: isLikedByCurrentUser,
-        isBookmarked: isBookmarkedByCurrentUser,
-      }
+      // Transform postImages to a cleaner array of image objects for the client
+      const imagesForClient = (postData.postImages || [])
+        .map((pi) => pi.image)
+        .filter((img): img is { id: number; url: string } => img !== null)
 
-      return c.json(responseData, 200)
+      const response: PostQueryResult = {
+        ...(postData as PostQueryResult),
+        isLiked,
+        isBookmarked,
+        imagesForClient,
+      }
+      // Remove the original postImages from the response if it's verbose or not needed by client
+      // delete (response as any).postImages;
+
+      return c.json(response)
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return c.json(
-          { error: 'Invalid Post ID format', details: error.flatten() },
-          400,
-        )
-      }
-      console.error('Error fetching post:', error)
-      const errorMessage =
-        error instanceof Error ? error.message : 'Internal server error'
-      return c.json(
-        { error: 'Failed to fetch post', details: errorMessage },
-        500,
-      )
+      console.error(`Error fetching post ${postId}:`, error)
+      if (error instanceof HTTPException) throw error
+      return c.json({ error: 'Failed to fetch post details' }, 500)
     }
   },
 )
@@ -427,108 +469,66 @@ postRoutes.get(
 postRoutes.post(
   '/:postId/like',
   requireAuthMiddleware,
-  // Keep zValidator for early exit on bad format, but parse manually
   zValidator('param', postIdParamSchema, (result, c) => {
     if (!result.success) {
-      // Use HTTPException for standard error handling
-      throw new HTTPException(400, {
-        message: 'Invalid Post ID format',
-        cause: result.error,
-      })
+      return c.json({ error: 'Invalid post ID format' }, 400)
     }
   }),
-  async (c: Context<PostRoutesAppEnv>) => {
+  async (c) => {
     const user = c.get('user')
-    // Check user again for type safety, though middleware should guarantee it
-    if (!user || !user.id) {
-      // This case should ideally not be reachable if requireAuthMiddleware works correctly
-      console.error('User not found in context after requireAuthMiddleware')
-      throw new HTTPException(401, { message: 'Authentication required' })
-    }
-    const userId = user.id // userId is now safely non-null
+    if (!user) return c.json({ error: 'User not authenticated' }, 401) // Should be caught by middleware anyway
+    const userId = user.id
 
-    let postId: number
-    try {
-      // Manual parse for param
-      const params = postIdParamSchema.parse(c.req.param())
-      postId = params.postId
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        throw new HTTPException(400, {
-          message: 'Invalid Post ID format',
-          cause: error,
-        })
-      }
-      throw error // Re-throw other unexpected errors
-    }
+    const { postId } = c.req.valid('param')
 
     try {
       const result = await db.transaction(async (tx) => {
-        // Check if the post exists first
         const postExists = await tx.query.posts.findFirst({
           where: eq(posts.id, postId),
-          columns: { id: true },
+          columns: { id: true, likeCount: true },
         })
+
         if (!postExists) {
           throw new HTTPException(404, { message: 'Post not found' })
         }
 
         const existingLike = await tx.query.likes.findFirst({
           where: and(eq(likes.postId, postId), eq(likes.userId, userId)),
-          columns: { userId: true },
         })
 
-        let didLike: boolean
-        let newLikeCount: number | null = null // Initialize to null
+        let liked: boolean
+        let currentLikeCount: number = postExists.likeCount ?? 0
 
         if (existingLike) {
           // Unlike
           await tx
             .delete(likes)
             .where(and(eq(likes.postId, postId), eq(likes.userId, userId)))
-          const updateResult = await tx
+          await tx
             .update(posts)
             .set({ likeCount: sql`GREATEST(0, ${posts.likeCount} - 1)` })
             .where(eq(posts.id, postId))
-            .returning({ likeCount: posts.likeCount })
-          newLikeCount = updateResult[0]?.likeCount ?? null
-          didLike = false
-          console.log(`User ${userId} unliked post ${postId}`)
+          liked = false
+          currentLikeCount = Math.max(0, currentLikeCount - 1)
         } else {
           // Like
-          await tx.insert(likes).values({ postId: postId, userId: userId })
-          const updateResult = await tx
+          await tx
+            .insert(likes)
+            .values({ postId, userId, createdAt: new Date() })
+          await tx
             .update(posts)
             .set({ likeCount: sql`${posts.likeCount} + 1` })
             .where(eq(posts.id, postId))
-            .returning({ likeCount: posts.likeCount })
-          newLikeCount = updateResult[0]?.likeCount ?? null
-          didLike = true
-          console.log(`User ${userId} liked post ${postId}`)
+          liked = true
+          currentLikeCount = currentLikeCount + 1
         }
-        // Ensure likeCount is a number or null, default to 0 if somehow undefined after update
-        const finalLikeCount = newLikeCount === undefined ? 0 : newLikeCount
-        return { didLike, likeCount: finalLikeCount }
+        return { liked, likeCount: currentLikeCount }
       })
-      // Return 200 OK with the result
-      return c.json(result, 200)
+      return c.json(result)
     } catch (error) {
-      // Re-throw HTTPException to be handled globally
-      if (error instanceof HTTPException) {
-        throw error
-      }
-      // Log other errors and return 500
-      console.error(
-        `Error liking/unliking post ${postId} for user ${userId}:`,
-        error,
-      )
-      const errorMessage =
-        error instanceof Error ? error.message : 'Internal server error'
-      // Use HTTPException for consistency in error responses
-      throw new HTTPException(500, {
-        message: 'Failed to update like status',
-        cause: error,
-      })
+      if (error instanceof HTTPException) throw error
+      console.error('Error liking/unliking post:', error)
+      return c.json({ error: 'Failed to update like status' }, 500)
     }
   },
 )
@@ -828,29 +828,26 @@ postRoutes.post(
   requireAuthMiddleware,
   zValidator('param', postIdParamSchema, (result, c) => {
     if (!result.success) {
-      throw new HTTPException(400, { message: 'Invalid Post ID format' })
+      return c.json({ error: 'Invalid post ID format' }, 400)
     }
   }),
   async (c) => {
     const user = c.get('user')
-    if (!user || !user.id) {
-      throw new HTTPException(401, { message: 'Authentication required' })
-    }
+    if (!user?.id) return c.json({ error: 'User not authenticated' }, 401)
     const userId = user.id
     const { postId } = c.req.valid('param')
 
     try {
       const result = await db.transaction(async (tx) => {
-        // Check if post exists
-        const postExists = await tx.query.posts.findFirst({
+        const post = await tx.query.posts.findFirst({
           where: eq(posts.id, postId),
-          columns: { id: true },
+          columns: { id: true, bookmarkCount: true },
         })
-        if (!postExists) {
+
+        if (!post) {
           throw new HTTPException(404, { message: 'Post not found' })
         }
 
-        // Check if already bookmarked
         const existingBookmark = await tx.query.bookmarks.findFirst({
           where: and(
             eq(bookmarks.postId, postId),
@@ -858,55 +855,251 @@ postRoutes.post(
           ),
         })
 
-        let didBookmark: boolean
-        let newBookmarkCount: number | null = null
+        let currentBookmarkCount = post.bookmarkCount ?? 0
 
         if (existingBookmark) {
-          // Unbookmark
-          await tx
-            .delete(bookmarks)
-            .where(
-              and(eq(bookmarks.postId, postId), eq(bookmarks.userId, userId)),
-            )
-          const updateResult = await tx
-            .update(posts)
-            .set({
-              bookmarkCount: sql`GREATEST(0, ${posts.bookmarkCount} - 1)`,
-            })
-            .where(eq(posts.id, postId))
-            .returning({ bookmarkCount: posts.bookmarkCount })
-          newBookmarkCount = updateResult[0]?.bookmarkCount ?? null
-          didBookmark = false
-          console.log(`User ${userId} unbookmarked post ${postId}`)
-        } else {
-          // Bookmark
-          await tx.insert(bookmarks).values({ postId: postId, userId: userId })
-          const updateResult = await tx
-            .update(posts)
-            .set({ bookmarkCount: sql`${posts.bookmarkCount} + 1` })
-            .where(eq(posts.id, postId))
-            .returning({ bookmarkCount: posts.bookmarkCount })
-          newBookmarkCount = updateResult[0]?.bookmarkCount ?? null
-          didBookmark = true
-          console.log(`User ${userId} bookmarked post ${postId}`)
+          return { bookmarked: true, bookmarkCount: currentBookmarkCount }
         }
-        const finalBookmarkCount =
-          newBookmarkCount === null ? 0 : newBookmarkCount
 
-        return { didBookmark, bookmarkCount: finalBookmarkCount }
+        await tx
+          .insert(bookmarks)
+          .values({ postId, userId, createdAt: new Date() })
+        await tx
+          .update(posts)
+          .set({ bookmarkCount: sql`${posts.bookmarkCount} + 1` })
+          .where(eq(posts.id, postId))
+
+        currentBookmarkCount++
+        return { bookmarked: true, bookmarkCount: currentBookmarkCount }
       })
-      return c.json(result, 200)
+      return c.json(result)
     } catch (error) {
-      if (error instanceof HTTPException) {
-        throw error
-      }
-      console.error(
-        `Error bookmarking/unbookmarking post ${postId} for user ${userId}:`,
-        error,
-      )
-      throw new HTTPException(500, {
-        message: 'Failed to update bookmark status',
+      if (error instanceof HTTPException) throw error
+      console.error('Error bookmarking post:', error)
+      return c.json({ error: 'Failed to bookmark post' }, 500)
+    }
+  },
+)
+
+// DELETE /api/posts/:postId/bookmark - Unbookmark a post
+postRoutes.delete(
+  '/:postId/bookmark',
+  requireAuthMiddleware,
+  zValidator('param', postIdParamSchema, (result, c) => {
+    if (!result.success) {
+      return c.json({ error: 'Invalid post ID format' }, 400)
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user) return c.json({ error: 'User not authenticated' }, 401)
+    const userId = user.id
+    const { postId } = c.req.valid('param')
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        const post = await tx.query.posts.findFirst({
+          where: eq(posts.id, postId),
+          columns: { id: true, bookmarkCount: true },
+        })
+
+        if (!post) {
+          // Post not found, but if user is trying to unbookmark, it implies it might have existed.
+          // Or, if it never existed, no bookmark could exist. Consider current behavior sufficient.
+          throw new HTTPException(404, { message: 'Post not found' })
+        }
+
+        const existingBookmark = await tx.query.bookmarks.findFirst({
+          where: and(
+            eq(bookmarks.postId, postId),
+            eq(bookmarks.userId, userId),
+          ),
+        })
+
+        let currentBookmarkCount = post.bookmarkCount ?? 0
+
+        if (!existingBookmark) {
+          // Not bookmarked, do nothing, return current state
+          return { bookmarked: false, bookmarkCount: currentBookmarkCount }
+        }
+
+        // Remove bookmark
+        await tx
+          .delete(bookmarks)
+          .where(
+            and(eq(bookmarks.postId, postId), eq(bookmarks.userId, userId)),
+          )
+
+        // Use increment with negative value for decrement, ensuring it doesn't go below 0 via GREATEST or similar logic if needed
+        // For now, direct decrement. Drizzle's increment(column, -1) should handle this.
+        // Or more explicitly: sql`GREATEST(0, ${posts.bookmarkCount} - 1)`
+        await tx
+          .update(posts)
+          .set({ bookmarkCount: sql`GREATEST(0, ${posts.bookmarkCount} - 1)` })
+          .where(eq(posts.id, postId))
+
+        currentBookmarkCount = Math.max(0, currentBookmarkCount - 1)
+        return { bookmarked: false, bookmarkCount: currentBookmarkCount }
       })
+      return c.json(result)
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error('Error unbookmarking post:', error)
+      return c.json({ error: 'Failed to unbookmark post' }, 500)
+    }
+  },
+)
+
+// GET /api/posts/:postId/remix-tree - Get remix tree for a post
+postRoutes.get(
+  '/:postId/remix-tree',
+  requireAuthMiddleware,
+  zValidator('param', postIdParamSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid Post ID format',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const { postId } = c.req.valid('param')
+
+    try {
+      type FetchedPostNode = {
+        id: number
+        title: string | null
+        parentId: number | null // This will be mapped from parentPostId
+        coverImg: string | null
+        createdAt: Date | null // Date from DB
+        author: {
+          id: string
+          username: string | null
+          name: string | null
+          image: string | null
+        } | null
+      }
+
+      const fetchPostNodeData = async (
+        pId: number,
+      ): Promise<FetchedPostNode | null> => {
+        const post = await db.query.posts.findFirst({
+          where: eq(posts.id, pId),
+          columns: {
+            id: true,
+            title: true,
+            parentPostId: true, // Correct schema field name
+            coverImg: true,
+            createdAt: true,
+            // authorId is implicitly handled by the 'author' relation in 'with'
+          },
+          with: {
+            author: {
+              columns: { id: true, username: true, name: true, image: true },
+            },
+          },
+        })
+
+        if (!post) return null
+
+        return {
+          id: post.id,
+          title: post.title,
+          parentId: post.parentPostId, // Map from the correct schema field
+          coverImg: post.coverImg,
+          createdAt: post.createdAt,
+          author: post.author, // Access the nested author object from the 'with' clause
+        }
+      }
+
+      const lineage: RemixNodeSelf[] = []
+      const currentPostDataForLineage = await db.query.posts.findFirst({
+        where: eq(posts.id, postId),
+        columns: { parentPostId: true }, // Use schema field name
+      })
+      let currentAncestorId = currentPostDataForLineage?.parentPostId
+
+      while (currentAncestorId) {
+        const ancestorData = await fetchPostNodeData(currentAncestorId)
+        if (ancestorData) {
+          lineage.unshift({
+            id: ancestorData.id,
+            title: ancestorData.title,
+            author: ancestorData.author,
+            parentId: ancestorData.parentId, // This should now be correct from FetchedPostNode
+            coverImg: ancestorData.coverImg,
+            createdAt: ancestorData.createdAt?.toISOString() ?? null,
+            remixes: [],
+          })
+          currentAncestorId = ancestorData.parentId
+        } else {
+          currentAncestorId = null
+        }
+      }
+
+      const buildRemixTree = async (
+        pId: number,
+      ): Promise<RemixNodeSelf | null> => {
+        const nodeData = await fetchPostNodeData(pId)
+        if (!nodeData) return null
+
+        const childrenRecords = await db.query.posts.findMany({
+          where: eq(posts.parentPostId, pId), // Use correct schema field parentPostId for querying children
+          columns: { id: true },
+        })
+
+        const remixes: RemixNodeSelf[] = []
+        for (const childRecord of childrenRecords) {
+          const childTree = await buildRemixTree(childRecord.id)
+          if (childTree) {
+            remixes.push(childTree)
+          }
+        }
+        return {
+          id: nodeData.id,
+          title: nodeData.title,
+          author: nodeData.author,
+          parentId: nodeData.parentId, // Correct from FetchedPostNode
+          coverImg: nodeData.coverImg,
+          createdAt: nodeData.createdAt?.toISOString() ?? null,
+          remixes: remixes,
+        }
+      }
+
+      const tree = await buildRemixTree(postId)
+
+      if (!tree) {
+        throw new HTTPException(404, {
+          message: 'Post not found or tree could not be built',
+        })
+      }
+
+      const response = {
+        currentPostId: postId,
+        lineage: lineage,
+        tree: tree,
+      }
+
+      // Attempt to parse with Zod to ensure conformity, good for debugging
+      // This will throw if the structure is wrong, which is helpful.
+      // const validatedResponse = RemixTreeResponseSchema.parse(response);
+      // return c.json(validatedResponse);
+      return c.json(response)
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        // Catch Zod validation errors
+        console.error(
+          `Zod validation error for remix tree, post ${postId}:`,
+          error.flatten(),
+        )
+        throw new HTTPException(500, {
+          message: 'Internal server error: Remix tree data validation failed',
+          cause: error.flatten(),
+        })
+      }
+      if (error instanceof HTTPException) throw error
+      console.error(`Error fetching remix tree for post ${postId}:`, error)
+      throw new HTTPException(500, { message: 'Failed to fetch remix tree' })
     }
   },
 )

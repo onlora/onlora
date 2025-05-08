@@ -39,6 +39,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 
+import { RemixTreeDisplay } from '@/components/posts/RemixTreeDisplay'
 import {
   type CommentWithAuthor,
   type CreateCommentPayload,
@@ -46,12 +47,14 @@ import {
   getComments,
 } from '@/lib/api/commentApi'
 import {
+  type BookmarkActionResponse,
   type PostDetails,
-  type ToggleBookmarkResponse,
   type ToggleLikeResponse,
+  bookmarkPost,
   getPostDetails,
-  toggleBookmarkPost,
+  getRemixTree,
   toggleLikePost,
+  unbookmarkPost,
 } from '@/lib/api/postApi'
 
 // Helper to get initials from name
@@ -205,7 +208,7 @@ export default function PostDetailPage() {
       if (postIdString) {
         queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
       }
-      toast.success(data.didLike ? 'Post liked!' : 'Post unliked!')
+      toast.success(data.liked ? 'Post liked!' : 'Post unliked!')
     },
     onError: (err, _newLikeState, context) => {
       if (context?.previousPost && postIdString) {
@@ -224,16 +227,21 @@ export default function PostDetailPage() {
     },
   })
 
-  const bookmarkMutation = useMutation<
-    ToggleBookmarkResponse,
+  const toggleBookmarkMutation = useMutation<
+    BookmarkActionResponse,
     Error,
     void,
     { previousPost?: PostDetails }
   >({
     mutationFn: () => {
       if (!postIdString)
-        throw new Error('Post ID is missing for toggleBookmarkPost')
-      return toggleBookmarkPost(postIdString)
+        throw new Error('Post ID is missing for bookmark action')
+      if (!post)
+        throw new Error('Post data is not available for bookmark action')
+      if (post.isBookmarked) {
+        return unbookmarkPost(postIdString)
+      }
+      return bookmarkPost(postIdString)
     },
     onMutate: async () => {
       if (!postIdString) return
@@ -258,18 +266,20 @@ export default function PostDetailPage() {
       }
       return { previousPost }
     },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['myBookmarks'] })
-      toast.success(data.didBookmark ? 'Post bookmarked!' : 'Bookmark removed!')
+    onSuccess: (data, _variables, context) => {
+      if (postIdString) {
+        queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
+      }
+      toast.success(data.bookmarked ? 'Post bookmarked!' : 'Post unbookmarked!')
     },
-    onError: (err, _newBookmarkState, context) => {
+    onError: (err, _variables, context) => {
       if (context?.previousPost && postIdString) {
         queryClient.setQueryData<PostDetails>(
           ['post', postIdString],
           context.previousPost,
         )
       }
-      toast.error('Failed to update bookmark status. Please try again.')
+      toast.error('Failed to update bookmark. Please try again.')
       console.error('Bookmark mutation error:', err)
     },
     onSettled: () => {
@@ -669,22 +679,27 @@ export default function PostDetailPage() {
           <Repeat className="h-5 w-5" />
         </Button>
         <div className="flex-grow" />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-          onClick={() => bookmarkMutation.mutate()}
-          disabled={bookmarkMutation.isPending}
-          title={post.isBookmarked ? 'Remove Bookmark' : 'Bookmark Post'}
-        >
-          {bookmarkMutation.isPending ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : post.isBookmarked ? (
-            <Bookmark className="h-5 w-5 text-blue-500 fill-blue-500" />
-          ) : (
-            <Bookmark className="h-5 w-5" />
-          )}
-        </Button>
+        <div className="flex items-center">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+            onClick={() => toggleBookmarkMutation.mutate()}
+            disabled={toggleBookmarkMutation.isPending}
+            title={post.isBookmarked ? 'Remove Bookmark' : 'Bookmark Post'}
+          >
+            {toggleBookmarkMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : post.isBookmarked ? (
+              <Bookmark className="h-4 w-4 fill-primary text-primary" />
+            ) : (
+              <Bookmark className="h-4 w-4" />
+            )}
+          </Button>
+          <span className="text-xs text-muted-foreground ml-1">
+            {post.bookmarkCount ?? 0}
+          </span>
+        </div>
         <Button
           variant="ghost"
           size="icon"
@@ -694,6 +709,13 @@ export default function PostDetailPage() {
           <Share2 className="h-5 w-5" />
         </Button>
       </CardFooter>
+
+      <Separator className="my-0 dark:bg-gray-700" />
+
+      {/* Remix Tree Display */}
+      {postIdString && (
+        <RemixTreeDisplay postId={postIdString} getRemixTreeFn={getRemixTree} />
+      )}
 
       <Separator className="my-0 dark:bg-gray-700" />
 

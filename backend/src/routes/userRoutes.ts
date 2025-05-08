@@ -83,6 +83,25 @@ const visibilityQuerySchema = z.object({
   visibility: z.enum(visibilityEnum.enumValues).optional(),
 })
 
+// Define a type for the bookmarked post item, similar to FeedPost
+interface BookmarkedPostItem {
+  id: number
+  title: string | null
+  coverImg: string | null
+  createdAt: string | null // ISO string
+  author: {
+    id: string
+    name: string | null
+    image: string | null
+    username: string | null // Changed to nullable string
+  } | null
+  likeCount: number | null
+  commentCount: number | null
+  viewCount?: number | null
+  remixCount?: number | null
+  bookmarkedAt: string | null // When this user bookmarked it
+}
+
 // POST /api/users/:targetUserId/follow
 userRoutes.post(
   '/:targetUserId/follow',
@@ -1198,84 +1217,114 @@ userRoutes.get(
   },
 )
 
-// GET /api/users/me/bookmarks - Fetch posts bookmarked by the current user
+// GET /api/users/me/bookmarks - Get posts bookmarked by the current user
 userRoutes.get(
   '/me/bookmarks',
   requireAuthMiddleware,
   zValidator('query', paginationQuerySchema, (result, c) => {
     if (!result.success) {
-      throw new HTTPException(400, {
-        message: 'Invalid pagination parameters',
-        cause: result.error.flatten(),
-      })
+      return c.json(
+        { error: 'Validation failed', details: result.error.flatten() },
+        400,
+      )
     }
   }),
   async (c) => {
     const user = c.get('user')
-    if (!user || !user.id) {
-      throw new HTTPException(401, { message: 'Authentication required' })
+    if (!user) {
+      return c.json({ error: 'User not authenticated' }, 401)
     }
     const userId = user.id
     const { limit, offset } = c.req.valid('query')
 
     try {
-      // Find bookmark records for the user, ordered by when they were created
-      const bookmarkRecords = await db.query.bookmarks.findMany({
+      const results = await db.query.bookmarks.findMany({
         where: eq(bookmarks.userId, userId),
         orderBy: [desc(bookmarks.createdAt)],
-        limit: limit + 1, // Fetch one extra for pagination check
+        limit: limit,
         offset: offset,
         with: {
-          // Join with posts to get post details
           post: {
             columns: {
               id: true,
               title: true,
               coverImg: true,
+              createdAt: true,
               likeCount: true,
               commentCount: true,
               viewCount: true,
               remixCount: true,
-              bookmarkCount: true,
-              createdAt: true,
-              // Add any other fields needed for display card
+              visibility: true,
+              authorId: true,
             },
             with: {
-              // Also include author info for the post
               author: {
-                columns: { id: true, username: true, name: true, image: true },
+                columns: { id: true, name: true, image: true, username: true },
               },
             },
           },
         },
       })
 
-      const hasNextPage = bookmarkRecords.length > limit
-      const itemsToReturn = hasNextPage
-        ? bookmarkRecords.slice(0, limit)
-        : bookmarkRecords
-      const nextOffset = hasNextPage ? offset + limit : null
+      // Map results and then filter out nulls
+      const mappedBookmarks = results.map((b) => {
+        if (!b.post || b.post.visibility !== 'public') {
+          return null
+        }
+        const postDetails = b.post
+        const authorDetails = postDetails.author
+        // Construct the object matching BookmarkedPostItem structure explicitly
+        const bookmarkedItem: BookmarkedPostItem = {
+          id: postDetails.id,
+          title: postDetails.title,
+          coverImg: postDetails.coverImg,
+          createdAt: postDetails.createdAt?.toISOString() ?? null,
+          author: authorDetails
+            ? {
+                id: authorDetails.id,
+                name: authorDetails.name, // string | null
+                image: authorDetails.image, // string | null
+                username: authorDetails.username, // string | null
+              }
+            : null,
+          likeCount: postDetails.likeCount,
+          commentCount: postDetails.commentCount,
+          viewCount: postDetails.viewCount,
+          remixCount: postDetails.remixCount,
+          bookmarkedAt: b.createdAt?.toISOString() ?? null,
+        }
+        return bookmarkedItem
+      })
 
-      // Extract the post data from the bookmark records
-      const bookmarkedPosts = itemsToReturn.map((bm) => bm.post).filter(Boolean) // Filter out any null posts (shouldn't happen with innerJoin logic, but safer)
+      // Filter out the null values and assert the final type
+      const formattedBookmarks = mappedBookmarks.filter(
+        (item) => item !== null,
+      ) as BookmarkedPostItem[]
 
-      // TODO: Re-check isLiked / isBookmarked for the user on these specific posts?
-      // The base post object might not have the user-specific flags here.
-      // For simplicity now, return posts as is. Frontend might need separate checks if flags are needed.
+      // ... total count query remains the same ...
+      const totalBookmarksCountResult = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(bookmarks)
+        .innerJoin(posts, eq(bookmarks.postId, posts.id))
+        .where(
+          and(eq(bookmarks.userId, userId), eq(posts.visibility, 'public')),
+        )
+
+      const totalCount = totalBookmarksCountResult[0]?.count ?? 0
+      const totalPages = Math.ceil(totalCount / limit)
 
       return c.json({
-        items: bookmarkedPosts, // Return the array of post objects
-        pageInfo: {
-          hasNextPage,
-          nextOffset,
+        data: formattedBookmarks,
+        meta: {
+          limit,
+          offset,
+          totalCount,
+          totalPages,
+          currentPage: Math.floor(offset / limit) + 1,
         },
       })
     } catch (error) {
-      if (error instanceof HTTPException) throw error
-      console.error(
-        `Error fetching bookmarked posts for user ${userId}:`,
-        error,
-      )
+      console.error('Error fetching bookmarked posts for user:', userId, error)
       throw new HTTPException(500, {
         message: 'Failed to fetch bookmarked posts',
       })

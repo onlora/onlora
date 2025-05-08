@@ -382,22 +382,62 @@ export interface BookmarkedPostsPage {
   }
 }
 
+// --- Bookmarked Post Types ---
+
+// Type for the author within a bookmarked post item
+// Re-defined here for clarity, ensure it matches backend response
+export interface BookmarkedPostAuthor {
+  id: string
+  name: string | null
+  image: string | null
+  username: string | null
+}
+
+// Type for a single bookmarked post item
+export interface BookmarkedPostItem {
+  id: number
+  title: string | null
+  coverImg: string | null
+  createdAt: string | null // ISO string of post creation
+  author: BookmarkedPostAuthor | null
+  likeCount: number | null
+  commentCount: number | null
+  viewCount?: number | null
+  remixCount?: number | null
+  bookmarkedAt: string | null // ISO string of when bookmark was created
+}
+
+// Type for the pagination metadata (reusable)
+export interface PaginationMeta {
+  limit: number
+  offset: number
+  totalCount: number
+  totalPages: number
+  currentPage: number
+}
+
+// Type for the API response containing bookmarked posts
+export interface BookmarkedPostsResponse {
+  data: BookmarkedPostItem[]
+  meta: PaginationMeta
+}
+
 /**
- * Fetches posts bookmarked by the current user.
+ * Fetches posts bookmarked by the currently authenticated user.
  */
 export async function getMyBookmarkedPosts(params: {
   limit: number
   offset: number
-}): Promise<BookmarkedPostsPage> {
-  const queryParams = new URLSearchParams({
-    limit: String(params.limit),
-    offset: String(params.offset),
-  })
-  return apiClient<BookmarkedPostsPage>(
-    `/users/me/bookmarks?${queryParams.toString()}`,
+}): Promise<BookmarkedPostsResponse> {
+  const queryParams = new URLSearchParams()
+  queryParams.set('limit', String(params.limit))
+  queryParams.set('offset', String(params.offset))
+  const queryString = queryParams.toString()
+
+  return apiClient<BookmarkedPostsResponse>(
+    `/users/me/bookmarks?${queryString}`,
     {
-      method: 'GET',
-      credentials: 'include', // Required to identify the user
+      credentials: 'include', // Endpoint requires authentication
     },
   )
 }

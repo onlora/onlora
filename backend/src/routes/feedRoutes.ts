@@ -1,30 +1,20 @@
 import { zValidator } from '@hono/zod-validator'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm'
 import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { db } from '../db'
-import { follows, posts } from '../db/schema'
-import type { AuthenticatedContextEnv } from '../middleware/auth' // Optional: if auth affects feed
-import { requireAuthMiddleware } from '../middleware/auth'
-
-// Define the specific Environment for this router
-interface FeedRoutesAppEnv extends AuthenticatedContextEnv {
-  Variables: {
-    user?: AuthenticatedContextEnv['Variables']['user']
-  }
-  ValidatedData: {
-    // Define specific query types if needed, or use a union
-    query:
-      | z.infer<typeof latestFeedQuerySchema>
-      | z.infer<typeof trendingFeedQuerySchema>
-      | z.infer<typeof followingFeedQuerySchema>
-  }
-}
-
-const feedRoutes = new Hono<FeedRoutesAppEnv>()
+import { follows, likes, posts, users } from '../db/schema'
+import type { AuthenticatedContextEnv } from '../middleware/auth'
+import {
+  optionalAuthMiddleware,
+  requireAuthMiddleware,
+} from '../middleware/auth'
 
 const LATEST_FEED_PAGE_SIZE = 20
+const RECOMMENDED_FEED_PAGE_SIZE = 15
+const TRENDING_FEED_PAGE_SIZE = 15
+const FOLLOWING_FEED_PAGE_SIZE = 20
 
 const latestFeedQuerySchema = z.object({
   page: z
@@ -43,33 +33,98 @@ const latestFeedQuerySchema = z.object({
     }),
 })
 
-// Helper type for the structure of posts in the feed
-// Similar to PostDetails but potentially simpler for feed cards
+const recommendedFeedQuerySchema = z.object({
+  page: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .default('1')
+    .refine((val) => val >= 1, { message: 'Page must be 1 or greater' }),
+  pageSize: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .default(RECOMMENDED_FEED_PAGE_SIZE.toString())
+    .refine((val) => val >= 5 && val <= 30, {
+      message: 'Page size must be between 5 and 30',
+    }),
+})
+
+const trendingFeedQuerySchema = z.object({
+  page: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .default('1')
+    .refine((val) => val >= 1, { message: 'Page must be 1 or greater' }),
+  pageSize: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .default(TRENDING_FEED_PAGE_SIZE.toString())
+    .refine((val) => val >= 5 && val <= 30, {
+      message: 'Page size must be between 5 and 30',
+    }),
+})
+
+const followingFeedQuerySchema = z.object({
+  page: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .default('1')
+    .refine((val) => val >= 1, { message: 'Page must be 1 or greater' }),
+  pageSize: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .default(FOLLOWING_FEED_PAGE_SIZE.toString())
+    .refine((val) => val >= 5 && val <= 50, {
+      message: 'Page size must be between 5 and 50',
+    }),
+})
+
+interface FeedRoutesAppEnv extends AuthenticatedContextEnv {
+  Variables: {
+    user?: AuthenticatedContextEnv['Variables']['user']
+  }
+  ValidatedData: {
+    query:
+      | z.infer<typeof latestFeedQuerySchema>
+      | z.infer<typeof trendingFeedQuerySchema>
+      | z.infer<typeof recommendedFeedQuerySchema>
+      | z.infer<typeof followingFeedQuerySchema>
+  }
+}
+
+const feedRoutes = new Hono<FeedRoutesAppEnv>()
+
 interface FeedPost {
   id: number
   title: string | null
-  coverImg: string | null // For the feed card
+  coverImg: string | null
   createdAt: string | null
   author: {
     id: string
     name: string | null
     image: string | null
+    username?: string
   } | null
   likeCount: number | null
   commentCount: number | null
-  // Add any other fields needed for feed cards, e.g., viewCount
   viewCount?: number | null
+  remixCount?: number | null
+  score?: number
 }
 
-// Helper type for trending posts from mv_post_hot
 interface TrendingFeedPost {
-  id: number // postId
+  id: number
   title: string | null
   coverImg: string | null
   author: {
-    id: string | null // author_id from the view
-    username: string | null // author_username
-    avatarUrl: string | null // author_avatar_url
+    id: string | null
+    username: string | null
+    avatarUrl: string | null
   } | null
   likeCount: number | null
   commentCount: number | null
@@ -78,7 +133,6 @@ interface TrendingFeedPost {
   createdAt: string | null
 }
 
-// Define a type for the raw row structure from mv_post_hot query
 type MvPostHotRow = {
   id: number
   author_id: string | null
@@ -88,12 +142,11 @@ type MvPostHotRow = {
   like_count: number | null
   comment_count: number | null
   score: number | null
-  created_at: string | null // Date might come as string from raw query
+  created_at: string | null
   author_username: string | null
   author_avatar_url: string | null
 }
 
-// GET /api/feed/latest - Fetch latest public posts
 feedRoutes.get(
   '/latest',
   zValidator('query', latestFeedQuerySchema, (result, c) => {
@@ -105,7 +158,9 @@ feedRoutes.get(
     }
   }),
   async (c: Context<FeedRoutesAppEnv>) => {
-    const { page, pageSize } = c.req.valid('query')
+    const { page, pageSize } = c.req.valid('query') as z.infer<
+      typeof latestFeedQuerySchema
+    >
     const offset = (page - 1) * pageSize
 
     try {
@@ -116,10 +171,9 @@ feedRoutes.get(
         offset: offset,
         with: {
           author: {
-            columns: { id: true, name: true, image: true },
+            columns: { id: true, name: true, image: true, username: true },
           },
         },
-        // Select only necessary columns to keep payload small
         columns: {
           id: true,
           title: true,
@@ -127,23 +181,30 @@ feedRoutes.get(
           createdAt: true,
           likeCount: true,
           commentCount: true,
-          viewCount: true, // Assuming viewCount is available
+          viewCount: true,
+          remixCount: true,
         },
       })
 
-      // Map to the FeedPost structure
       const feedPosts: FeedPost[] = latestPostsData.map((post) => ({
         id: post.id,
         title: post.title,
         coverImg: post.coverImg,
         createdAt: post.createdAt?.toISOString() ?? null,
-        author: post.author,
+        author: post.author
+          ? {
+              id: post.author.id,
+              name: post.author.name,
+              image: post.author.image,
+              username: post.author.username ?? undefined,
+            }
+          : null,
         likeCount: post.likeCount,
         commentCount: post.commentCount,
         viewCount: post.viewCount,
+        remixCount: post.remixCount,
       }))
 
-      // Optionally, fetch total count for pagination metadata
       const totalPublicPostsResult = await db
         .select({ count: sql<number>`count(*)` })
         .from(posts)
@@ -167,25 +228,6 @@ feedRoutes.get(
   },
 )
 
-const TRENDING_FEED_PAGE_SIZE = 15
-const trendingFeedQuerySchema = z.object({
-  page: z
-    .string()
-    .regex(/^\d+$/)
-    .transform(Number)
-    .default('1')
-    .refine((val) => val >= 1, { message: 'Page must be 1 or greater' }),
-  pageSize: z
-    .string()
-    .regex(/^\d+$/)
-    .transform(Number)
-    .default(TRENDING_FEED_PAGE_SIZE.toString())
-    .refine((val) => val >= 5 && val <= 30, {
-      message: 'Page size must be between 5 and 30',
-    }),
-})
-
-// GET /api/feed/trending - Fetch trending posts from mv_post_hot
 feedRoutes.get(
   '/trending',
   zValidator('query', trendingFeedQuerySchema, (result, c) => {
@@ -197,14 +239,12 @@ feedRoutes.get(
     }
   }),
   async (c: Context<FeedRoutesAppEnv>) => {
-    const { page, pageSize } = c.req.valid('query')
+    const { page, pageSize } = c.req.valid('query') as z.infer<
+      typeof trendingFeedQuerySchema
+    >
     const offset = (page - 1) * pageSize
 
     try {
-      // Drizzle doesn't have direct support for querying materialized views as if they are tables
-      // in the same way it does for tables defined in schema.ts via db.query.materializedViewName.
-      // We need to use a raw SQL query.
-      // Ensure the columns selected match the TrendingFeedPost interface and mv_post_hot structure.
       const trendingPostsData = (await db.execute(sql`
         SELECT 
           id,
@@ -222,35 +262,44 @@ feedRoutes.get(
         ORDER BY score DESC, created_at DESC
         LIMIT ${pageSize}
         OFFSET ${offset};
-      `)) as TrendingFeedPost[] // Type assertion, ensure query returns this shape
+      `)) as unknown as MvPostHotRow[]
 
-      // Map to the TrendingFeedPost structure, converting date and structuring author
-      const feedPosts: TrendingFeedPost[] = (
-        trendingPostsData as MvPostHotRow[]
-      ).map((row: MvPostHotRow) => ({
-        id: row.id,
-        title: row.title,
-        coverImg: row.cover_img,
-        author: {
-          id: row.author_id,
-          username: row.author_username,
-          avatarUrl: row.author_avatar_url,
-        },
-        likeCount: row.like_count,
-        commentCount: row.comment_count,
-        remixCount: row.remix_count,
-        score: row.score,
-        createdAt: row.created_at
-          ? new Date(row.created_at).toISOString()
-          : null,
-      }))
-
-      // For pagination meta, count total rows in mv_post_hot
-      // Note: Counting large materialized views can be slow if not indexed or optimized well.
-      const totalTrendingPostsResult = await db.execute(
-        sql`SELECT count(*) as total_count FROM mv_post_hot;`,
+      const feedPosts: TrendingFeedPost[] = trendingPostsData.map(
+        (row: MvPostHotRow) => ({
+          id: row.id,
+          title: row.title,
+          coverImg: row.cover_img,
+          author: {
+            id: row.author_id,
+            username: row.author_username,
+            avatarUrl: row.author_avatar_url,
+          },
+          likeCount: row.like_count,
+          commentCount: row.comment_count,
+          remixCount: row.remix_count,
+          score: row.score,
+          createdAt: row.created_at
+            ? new Date(row.created_at).toISOString()
+            : null,
+        }),
       )
-      const totalCount = Number(totalTrendingPostsResult[0]?.total_count ?? 0)
+
+      const countResult = (await db.execute(
+        sql`SELECT COUNT(*) as count FROM mv_post_hot;`,
+      )) as unknown as [{ count: number | string }]
+
+      let totalCount = 0
+      if (
+        countResult &&
+        countResult.length > 0 &&
+        countResult[0] !== undefined
+      ) {
+        const countValue = countResult[0].count
+        totalCount =
+          typeof countValue === 'string'
+            ? Number.parseInt(countValue, 10)
+            : countValue
+      }
       const totalPages = Math.ceil(totalCount / pageSize)
 
       return c.json({
@@ -264,28 +313,146 @@ feedRoutes.get(
       })
     } catch (error) {
       console.error('Error fetching trending feed:', error)
-      // It's good to check if the error is from the DB or elsewhere
-      if (
-        error instanceof Error &&
-        error.message.includes('relation "mv_post_hot" does not exist')
-      ) {
-        return c.json(
-          {
-            error:
-              'Trending feed is currently unavailable. The materialized view might not be created or refreshed yet.',
-          },
-          503,
-        )
-      }
       return c.json({ error: 'Failed to fetch trending feed' }, 500)
     }
   },
 )
 
-// Schema for following feed pagination (can reuse latestFeedQuerySchema)
-const followingFeedQuerySchema = latestFeedQuerySchema
+feedRoutes.get(
+  '/recommended',
+  optionalAuthMiddleware,
+  zValidator('query', recommendedFeedQuerySchema, (result, c) => {
+    if (!result.success) {
+      return c.json(
+        { error: 'Validation failed', details: result.error.flatten() },
+        400,
+      )
+    }
+  }),
+  async (c: Context<FeedRoutesAppEnv>) => {
+    const { page, pageSize } = c.req.valid('query') as z.infer<
+      typeof recommendedFeedQuerySchema
+    >
+    const offset = (page - 1) * pageSize
+    const currentUser = c.get('user')
 
-// GET /api/feed/following - Fetch posts from users the current user follows
+    try {
+      const W_LIKES = 1.5
+      const W_COMMENTS = 2.0
+      const W_REMIXES = 2.5
+      const W_AGE_DECAY_PER_DAY = 0.1
+
+      const conditions = [eq(posts.visibility, 'public')]
+      if (currentUser?.id) {
+        conditions.push(sql`${posts.authorId} != ${currentUser.id}`)
+        const likedPostIdsSubquery = db
+          .select({ postId: likes.postId })
+          .from(likes)
+          .where(eq(likes.userId, currentUser.id))
+        conditions.push(notInArray(posts.id, likedPostIdsSubquery))
+      }
+
+      const scoreSQL = sql<number>`(
+          COALESCE(${posts.likeCount}, 0) * ${W_LIKES} +
+          COALESCE(${posts.commentCount}, 0) * ${W_COMMENTS} +
+          COALESCE(${posts.remixCount}, 0) * ${W_REMIXES}
+        ) / (1 + EXTRACT(EPOCH FROM (NOW() - ${posts.createdAt})) / (3600 * 24) * ${W_AGE_DECAY_PER_DAY})`
+
+      const recommendedPostsData = await db
+        .select({
+          id: posts.id,
+          title: posts.title,
+          coverImg: posts.coverImg,
+          createdAt: posts.createdAt,
+          authorId: posts.authorId,
+          likeCount: posts.likeCount,
+          commentCount: posts.commentCount,
+          viewCount: posts.viewCount,
+          remixCount: posts.remixCount,
+          score: scoreSQL,
+        })
+        .from(posts)
+        .where(and(...conditions))
+        .orderBy(desc(scoreSQL), desc(posts.createdAt))
+        .limit(pageSize)
+        .offset(offset)
+
+      const authorIds = [
+        ...new Set(
+          recommendedPostsData
+            .map((p) => p.authorId)
+            .filter(Boolean) as string[],
+        ),
+      ]
+      let authorsMap: Map<
+        string,
+        {
+          id: string
+          name: string | null
+          image: string | null
+          username: string | null
+        }
+      > = new Map()
+      if (authorIds.length > 0) {
+        const authorDetails = await db.query.users.findMany({
+          where: inArray(users.id, authorIds),
+          columns: { id: true, name: true, image: true, username: true },
+        })
+        authorsMap = new Map(authorDetails.map((u) => [u.id, u]))
+      }
+
+      const feedPosts: FeedPost[] = recommendedPostsData.map((post) => {
+        const authorData = post.authorId ? authorsMap.get(post.authorId) : null
+        return {
+          id: post.id,
+          title: post.title,
+          coverImg: post.coverImg,
+          createdAt: post.createdAt?.toISOString() ?? null,
+          author: authorData
+            ? {
+                id: authorData.id,
+                name: authorData.name,
+                image: authorData.image,
+                username: authorData.username ?? undefined,
+              }
+            : null,
+          likeCount: post.likeCount,
+          commentCount: post.commentCount,
+          viewCount: post.viewCount,
+          remixCount: post.remixCount,
+          score: post.score,
+        }
+      })
+
+      const totalRecommendedEstimateResult = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(posts)
+        .where(and(...conditions))
+      const totalCount = totalRecommendedEstimateResult[0]?.count ?? 0
+      const totalPages = Math.ceil(totalCount / pageSize)
+
+      return c.json({
+        data: feedPosts,
+        meta: {
+          page,
+          pageSize,
+          totalCount,
+          totalPages,
+        },
+      })
+    } catch (error) {
+      console.error('Error fetching recommended feed:', error)
+      if (error instanceof HTTPException) throw error
+      const errorMessage =
+        error instanceof Error ? error.message : 'Internal Server Error'
+      throw new HTTPException(500, {
+        message: 'Failed to fetch recommended feed',
+        cause: errorMessage,
+      })
+    }
+  },
+)
+
 feedRoutes.get(
   '/following',
   requireAuthMiddleware,
@@ -297,46 +464,43 @@ feedRoutes.get(
       )
     }
   }),
-  async (c) => {
+  async (c: Context<FeedRoutesAppEnv>) => {
     const user = c.get('user')
-    if (!user?.id) {
-      // Should be guaranteed by middleware, but check again
-      throw new HTTPException(401, { message: 'Authentication required' })
+    if (!user) {
+      throw new HTTPException(401, { message: 'User not authenticated' })
     }
     const userId = user.id
-
-    const { page, pageSize } = c.req.valid('query')
+    const { page, pageSize } = c.req.valid('query') as z.infer<
+      typeof followingFeedQuerySchema
+    >
     const offset = (page - 1) * pageSize
 
     try {
-      // Get IDs of users followed by the current user
-      const followedUsersResult = await db
-        .select({ userId: follows.followingId })
-        .from(follows)
-        .where(eq(follows.followerId, userId))
+      const followedUsers = await db.query.follows.findMany({
+        where: eq(follows.followerId, userId),
+        columns: { followingId: true },
+      })
 
-      const followedUserIds = followedUsersResult.map((f) => f.userId)
+      const followedUserIds = followedUsers.map((f) => f.followingId)
 
       if (followedUserIds.length === 0) {
-        // Return empty feed if not following anyone
         return c.json({
           data: [],
           meta: { page, pageSize, totalCount: 0, totalPages: 0 },
         })
       }
 
-      // Fetch posts where authorId is in the array of followed IDs
       const followingPostsData = await db.query.posts.findMany({
         where: and(
           eq(posts.visibility, 'public'),
-          inArray(posts.authorId, followedUserIds), // Use inArray
+          inArray(posts.authorId, followedUserIds),
         ),
         orderBy: [desc(posts.createdAt)],
         limit: pageSize,
         offset: offset,
         with: {
           author: {
-            columns: { id: true, name: true, image: true },
+            columns: { id: true, name: true, image: true, username: true },
           },
         },
         columns: {
@@ -347,6 +511,7 @@ feedRoutes.get(
           likeCount: true,
           commentCount: true,
           viewCount: true,
+          remixCount: true,
         },
       })
 
@@ -355,13 +520,20 @@ feedRoutes.get(
         title: post.title,
         coverImg: post.coverImg,
         createdAt: post.createdAt?.toISOString() ?? null,
-        author: post.author,
+        author: post.author
+          ? {
+              id: post.author.id,
+              name: post.author.name,
+              image: post.author.image,
+              username: post.author.username ?? undefined,
+            }
+          : null,
         likeCount: post.likeCount,
         commentCount: post.commentCount,
         viewCount: post.viewCount,
+        remixCount: post.remixCount,
       }))
 
-      // Fetch total count for pagination metadata
       const totalFollowingPostsResult = await db
         .select({ count: sql<number>`count(*)` })
         .from(posts)
@@ -371,7 +543,6 @@ feedRoutes.get(
             inArray(posts.authorId, followedUserIds),
           ),
         )
-
       const totalCount = totalFollowingPostsResult[0]?.count ?? 0
       const totalPages = Math.ceil(totalCount / pageSize)
 

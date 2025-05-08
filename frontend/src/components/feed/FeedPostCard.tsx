@@ -1,8 +1,8 @@
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import type { FeedPost } from '@/lib/api/feedApi'
+import { getInitials } from '@/lib/utils'
 import { formatDistanceToNowStrict } from 'date-fns'
-import { Eye, Heart, MessageSquare } from 'lucide-react'
+import { Eye, Heart, MessageCircle, Repeat2 } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import type React from 'react'
@@ -11,76 +11,108 @@ interface FeedPostCardProps {
   post: FeedPost
 }
 
-const getInitials = (name?: string | null) => {
-  if (!name) return '?'
-  const names = name.split(' ')
-  if (names.length === 1) return names[0][0]?.toUpperCase() ?? '?'
-  return (names[0][0] + (names[names.length - 1][0] || '')).toUpperCase()
-}
-
 const FeedPostCard: React.FC<FeedPostCardProps> = ({ post }) => {
-  const timeAgo = post.createdAt
+  const authorName = post.author?.name ?? 'Unknown Author'
+  const authorUsername = post.author?.username
+  const authorImage = post.author?.image
+
+  const postCreationDate = post.createdAt
     ? formatDistanceToNowStrict(new Date(post.createdAt), { addSuffix: true })
-    : 'some time ago'
+    : ''
 
   return (
-    <Card className="overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200 flex flex-col h-full dark:border-gray-700">
-      <Link href={`/posts/${post.id}`} className="block group">
-        <CardContent className="p-0">
-          {post.coverImg ? (
-            <div className="aspect-[1/1] w-full relative overflow-hidden">
-              <Image
-                src={post.coverImg}
-                alt={post.title || 'Feed post image'}
-                fill
-                sizes="(max-width: 640px) 90vw, (max-width: 1024px) 45vw, 30vw" // Example sizes, adjust based on grid layout
-                className="object-cover group-hover:scale-105 transition-transform duration-300"
-              />
-            </div>
+    <div className="bg-card border rounded-lg overflow-hidden shadow-sm transition-all hover:shadow-md">
+      <div className="p-4 sm:p-5">
+        <div className="flex items-center space-x-3 mb-3">
+          {post.author ? (
+            <Link
+              href={`/u/${authorUsername || post.author.id}`}
+              className="flex items-center space-x-3 group"
+            >
+              <Avatar className="h-10 w-10 border">
+                <AvatarImage src={authorImage ?? undefined} alt={authorName} />
+                <AvatarFallback>{getInitials(authorName)}</AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-sm font-semibold text-foreground group-hover:underline leading-tight">
+                  {authorName}
+                </p>
+                {authorUsername && (
+                  <p className="text-xs text-muted-foreground group-hover:underline leading-tight">
+                    @{authorUsername}
+                  </p>
+                )}
+              </div>
+            </Link>
           ) : (
-            <div className="aspect-[1/1] w-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-              <span className="text-gray-400 dark:text-gray-600 text-xs">
-                No Image
-              </span>
+            <div className="flex items-center space-x-3">
+              <Avatar className="h-10 w-10 border">
+                <AvatarFallback>??</AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-sm font-semibold text-foreground leading-tight">
+                  Unknown Author
+                </p>
+              </div>
             </div>
           )}
-        </CardContent>
-      </Link>
-
-      <CardFooter className="p-3 mt-auto bg-white dark:bg-gray-900/50 border-t dark:border-gray-700/50">
-        <div className="flex items-center space-x-2 overflow-hidden mr-2">
-          <Avatar className="h-6 w-6">
-            <AvatarImage
-              src={post.author?.image ?? undefined}
-              alt={post.author?.name ?? 'Author'}
-            />
-            <AvatarFallback>{getInitials(post.author?.name)}</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 overflow-hidden">
-            <p className="text-xs font-medium truncate text-gray-700 dark:text-gray-300">
-              {post.author?.name ?? 'Anonymous'}
-            </p>
-            {/* <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{timeAgo}</p> */}
-          </div>
+          <span className="text-xs text-muted-foreground ml-auto whitespace-nowrap">
+            {postCreationDate}
+          </span>
         </div>
-        <div className="flex items-center space-x-2 text-xs text-gray-500 dark:text-gray-400 ml-auto">
-          <div className="flex items-center">
-            <Heart className="h-3.5 w-3.5 mr-0.5" />
-            <span>{post.likeCount ?? 0}</span>
-          </div>
-          <div className="flex items-center">
-            <MessageSquare className="h-3.5 w-3.5 mr-0.5" />
-            <span>{post.commentCount ?? 0}</span>
-          </div>
-          {post.viewCount != null && (
-            <div className="hidden sm:flex items-center">
-              <Eye className="h-3.5 w-3.5 mr-0.5" />
+
+        {post.coverImg && (
+          <Link
+            href={`/posts/${post.id}`}
+            className="block mb-3 aspect-video relative rounded-md overflow-hidden border"
+          >
+            <Image
+              src={post.coverImg}
+              alt={post.title ?? 'Post image'}
+              fill
+              className="object-cover transition-transform duration-300 ease-in-out group-hover:scale-105"
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" // Basic responsive sizes
+            />
+          </Link>
+        )}
+
+        <Link href={`/posts/${post.id}`} className="block">
+          <h3 className="text-lg font-semibold leading-snug hover:underline mb-2">
+            {post.title || 'Untitled Post'}
+          </h3>
+        </Link>
+      </div>
+
+      <div className="px-4 sm:px-5 pb-4">
+        <div className="flex items-center justify-start space-x-4 text-xs text-muted-foreground">
+          {post.likeCount !== null && (
+            <div className="flex items-center" title="Likes">
+              <Heart className="w-3.5 h-3.5 mr-1" />
+              <span>{post.likeCount}</span>
+            </div>
+          )}
+          {post.commentCount !== null && (
+            <div className="flex items-center" title="Comments">
+              <MessageCircle className="w-3.5 h-3.5 mr-1" />
+              <span>{post.commentCount}</span>
+            </div>
+          )}
+          {post.viewCount !== null && typeof post.viewCount !== 'undefined' && (
+            <div className="flex items-center" title="Views">
+              <Eye className="w-3.5 h-3.5 mr-1" />
               <span>{post.viewCount}</span>
             </div>
           )}
+          {post.remixCount !== null &&
+            typeof post.remixCount !== 'undefined' && (
+              <div className="flex items-center" title="Remixes">
+                <Repeat2 className="w-3.5 h-3.5 mr-1" />
+                <span>{post.remixCount}</span>
+              </div>
+            )}
         </div>
-      </CardFooter>
-    </Card>
+      </div>
+    </div>
   )
 }
 

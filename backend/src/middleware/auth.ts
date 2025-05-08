@@ -66,3 +66,36 @@ export const requireAuthMiddleware = async (
   // User is authenticated, proceed to the next handler
   await next()
 }
+
+/**
+ * Hono middleware that attempts to verify JWT and attach user session to context,
+ * but does NOT block the request if the user is not authenticated.
+ * It populates c.var.user and c.var.session if a valid session exists.
+ */
+export const optionalAuthMiddleware = async (
+  c: Context<AuthenticatedContextEnv>,
+  next: Next,
+) => {
+  try {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers })
+
+    if (session && session.user) {
+      c.set('user', session.user)
+      c.set('session', session)
+      logger.info(
+        { userId: session.user?.id },
+        'User context populated (optional auth)',
+      )
+    } else {
+      logger.info('No active user session for optional auth.')
+      // User and session will remain undefined in context
+    }
+  } catch (error) {
+    logger.error(
+      { err: error },
+      'Error in optionalAuthMiddleware during getSession',
+    )
+    // Do not block request, just log error. User context will be missing.
+  }
+  await next()
+}

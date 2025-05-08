@@ -1,115 +1,210 @@
 'use client'
 
-import ProtectedPage from '@/components/auth/ProtectedPage'
-import FeedPostCard from '@/components/feed/FeedPostCard' // Use FeedPostCard for display
+import FeedPostCard from '@/components/feed/FeedPostCard'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import type { FeedPost } from '@/lib/api/feedApi'
 import {
-  type BookmarkedPostsPage,
+  type BookmarkedPostsResponse,
   getMyBookmarkedPosts,
 } from '@/lib/api/userApi'
 import { useSession } from '@/lib/authClient'
 import { type InfiniteData, useInfiniteQuery } from '@tanstack/react-query'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { Info, Loader2, ServerCrash } from 'lucide-react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useEffect, useMemo } from 'react'
 
-const BOOKMARKS_PER_PAGE = 16
+const BOOKMARKS_PAGE_SIZE = 12
 
-export default function BookmarksDisplayPage() {
-  const { data: session } = useSession()
+export default function BookmarksPage() {
+  const { data: session, isPending: isAuthLoading } = useSession()
   const router = useRouter()
-  const userId = session?.user?.id
+
+  const isAuthenticated = useMemo(() => {
+    if (isAuthLoading) return false
+    return !!session?.user
+  }, [isAuthLoading, session])
+
+  useEffect(() => {
+    if (!isAuthLoading && !isAuthenticated) {
+      router.push('/api/auth/signin/google?callbackUrl=/profile/bookmarks')
+    }
+  }, [isAuthenticated, isAuthLoading, router])
 
   const {
-    data: bookmarksData,
+    data,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
     isLoading,
+    isError,
     error,
   } = useInfiniteQuery<
-    BookmarkedPostsPage,
+    BookmarkedPostsResponse,
     Error,
-    InfiniteData<BookmarkedPostsPage>,
-    (string | undefined)[], // QueryKey type
-    number // PageParam type
+    InfiniteData<BookmarkedPostsResponse, number>,
+    [string],
+    number
   >({
-    queryKey: ['myBookmarksPage', userId], // Unique query key
-    queryFn: ({ pageParam = 0 }) =>
-      getMyBookmarkedPosts({ limit: BOOKMARKS_PER_PAGE, offset: pageParam }),
+    queryKey: ['myBookmarks'],
+    queryFn: async ({ pageParam = 0 }) => {
+      return getMyBookmarkedPosts({
+        limit: BOOKMARKS_PAGE_SIZE,
+        offset: pageParam,
+      })
+    },
     initialPageParam: 0,
-    getNextPageParam: (lastPage) =>
-      lastPage.pageInfo.hasNextPage ? lastPage.pageInfo.nextOffset : undefined,
-    enabled: !!userId,
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    getNextPageParam: (lastPage) => {
+      if (!lastPage?.meta) return undefined
+      const currentCount = lastPage.meta.offset + (lastPage.data?.length || 0)
+      if (currentCount < lastPage.meta.totalCount) {
+        return currentCount
+      }
+      return undefined
+    },
+    enabled: isAuthenticated,
+    staleTime: 1000 * 60 * 5,
   })
 
+  if (isAuthLoading) {
+    return (
+      <div className="p-4 md:p-6">
+        <h1 className="text-2xl font-semibold mb-4">My Bookmarks</h1>
+        <div className="flex justify-center items-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="ml-2 text-muted-foreground">
+            Checking authentication...
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!isAuthenticated) {
+    return null
+  }
+
+  if (isLoading) {
+    return (
+      <div className="p-4 md:p-6">
+        <h1 className="text-2xl font-semibold mb-4">My Bookmarks</h1>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          {[...Array(BOOKMARKS_PAGE_SIZE)].map((_, i) => (
+            <div
+              key={`skel-bookmark-${i}`}
+              className="border rounded-lg overflow-hidden shadow-sm"
+            >
+              <div className="p-4 sm:p-5 space-y-3">
+                <div className="flex items-center space-x-3">
+                  <Skeleton className="h-10 w-10 rounded-full" />
+                  <div className="space-y-1">
+                    <Skeleton className="h-4 w-24" />
+                    <Skeleton className="h-3 w-16" />
+                  </div>
+                </div>
+                <Skeleton className="aspect-video w-full rounded-md" />
+                <Skeleton className="h-5 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+              <div className="px-4 sm:px-5 pb-4">
+                <Skeleton className="h-4 w-20" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    const errorMessage =
+      error instanceof Error ? error.message : 'An unknown error occurred'
+    return (
+      <div className="p-4 md:p-6">
+        <h1 className="text-2xl font-semibold mb-4">My Bookmarks</h1>
+        <Alert variant="destructive">
+          <ServerCrash className="h-4 w-4" />
+          <AlertTitle>Error Loading Bookmarks</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
   const allBookmarkedPosts =
-    bookmarksData?.pages.flatMap((page) => page.items) ?? []
+    data?.pages.flatMap((page) => page.data ?? []) ?? []
 
   return (
-    <ProtectedPage>
-      <div className="container mx-auto max-w-4xl py-8">
-        <div className="mb-6">
-          <Button variant="outline" onClick={() => router.push('/profile')}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Profile
+    <div className="p-4 md:p-6">
+      <h1 className="text-2xl font-semibold mb-6">My Bookmarks</h1>
+
+      {allBookmarkedPosts.length === 0 && (
+        <Alert>
+          <Info className="h-4 w-4" />
+          <AlertTitle>No Bookmarks Found</AlertTitle>
+          <AlertDescription>
+            You haven't bookmarked any posts yet. Explore the feed and save your
+            favorites!
+            <Button variant="link" className="p-0 h-auto ml-1" asChild>
+              <Link href="/feed">Go to Feed</Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {allBookmarkedPosts.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          {allBookmarkedPosts.map((bookmarkItem) => {
+            const postForCard: FeedPost = {
+              id: bookmarkItem.id,
+              title: bookmarkItem.title,
+              coverImg: bookmarkItem.coverImg,
+              createdAt: bookmarkItem.createdAt,
+              author: bookmarkItem.author
+                ? {
+                    id: bookmarkItem.author.id,
+                    name: bookmarkItem.author.name,
+                    image: bookmarkItem.author.image,
+                    username: bookmarkItem.author.username ?? undefined,
+                  }
+                : null,
+              likeCount: bookmarkItem.likeCount,
+              commentCount: bookmarkItem.commentCount,
+              viewCount: bookmarkItem.viewCount,
+              remixCount: bookmarkItem.remixCount,
+              score: undefined,
+            }
+            return (
+              <FeedPostCard
+                key={`bookmark-${bookmarkItem.id}`}
+                post={postForCard}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {hasNextPage && (
+        <div className="text-center mt-8">
+          <Button
+            onClick={() => fetchNextPage()}
+            disabled={isFetchingNextPage}
+            variant="outline"
+            size="lg"
+          >
+            {isFetchingNextPage ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading more...
+              </>
+            ) : (
+              'Load More Bookmarks'
+            )}
           </Button>
         </div>
-        <h1 className="text-3xl font-bold mb-6">My Bookmarks</h1>
-
-        {isLoading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {[...Array(4)].map((_, i) => (
-              <Card key={`skel-bm-item-${i}`} className="h-[400px]">
-                <CardContent className="pt-6">
-                  <Skeleton className="h-4/5 w-full mb-4" />
-                  <Skeleton className="h-5 w-3/4 mb-2" />
-                  <Skeleton className="h-4 w-1/4" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-        {error && (
-          <Card>
-            <CardContent className="pt-6 text-center text-destructive">
-              Failed to load bookmarks: {error.message}
-            </CardContent>
-          </Card>
-        )}
-        {!isLoading && !error && allBookmarkedPosts.length === 0 && (
-          <Card>
-            <CardContent className="pt-6 text-center text-muted-foreground">
-              You haven't bookmarked any posts yet.
-            </CardContent>
-          </Card>
-        )}
-
-        {!isLoading && !error && allBookmarkedPosts.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {allBookmarkedPosts.map((post) => (
-              <FeedPostCard key={post.id} post={post} />
-            ))}
-          </div>
-        )}
-
-        {hasNextPage && (
-          <div className="mt-8 flex justify-center">
-            <Button
-              onClick={() => fetchNextPage()}
-              disabled={isFetchingNextPage}
-              variant="outline"
-            >
-              {isFetchingNextPage && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
-              Load More Bookmarks
-            </Button>
-          </div>
-        )}
-      </div>
-    </ProtectedPage>
+      )}
+    </div>
   )
 }

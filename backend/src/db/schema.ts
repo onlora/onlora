@@ -214,6 +214,9 @@ export const usersRelations = relations(users, ({ many }) => ({
   jams: many(jams),
   veTxns: many(veTxns),
   bookmarks: many(bookmarks),
+  followers: many(follows, {
+    relationName: 'userFollowers',
+  }),
 }))
 
 export const jamsRelations = relations(jams, ({ one, many }) => ({
@@ -355,28 +358,28 @@ export const jamSessionsRelations = relations(jamSessions, ({ one, many }) => ({
 export const bookmarks = pgTable(
   'bookmarks',
   {
+    postId: bigint('post_id', { mode: 'number' })
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    postId: integer('post_id') // Changed to integer to match posts.id
-      .notNull()
-      .references(() => posts.id, { onDelete: 'cascade' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   },
   (table) => {
     return {
-      pk: primaryKey({ columns: [table.userId, table.postId] }),
+      pk: primaryKey({ columns: [table.postId, table.userId] }),
     }
   },
 )
 
 export const bookmarksRelations = relations(bookmarks, ({ one }) => ({
-  user: one(users, {
-    fields: [bookmarks.userId],
-    references: [users.id],
-  }),
   post: one(posts, {
     fields: [bookmarks.postId],
     references: [posts.id],
+  }),
+  user: one(users, {
+    fields: [bookmarks.userId],
+    references: [users.id],
   }),
 }))
