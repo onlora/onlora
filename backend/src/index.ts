@@ -17,8 +17,10 @@ import {
   requireAuthMiddleware,
 } from './middleware/auth'
 import commentRoutes from './routes/commentRoutes'
+import feedRoutes from './routes/feedRoutes'
 import jamRoutes from './routes/jamRoutes'
 import postRoutes from './routes/postRoutes'
+import userRoutes from './routes/userRoutes'
 
 interface AppEnv extends AuthenticatedContextEnv {}
 
@@ -64,6 +66,8 @@ app.all('/api/auth/*', async (c) => {
 app.route('/api/jams', jamRoutes)
 app.route('/api/posts', postRoutes)
 app.route('/api/comments', commentRoutes)
+app.route('/api/feed', feedRoutes)
+app.route('/api/users', userRoutes)
 
 // SSE Infrastructure
 interface TaskProgressNotifier {
@@ -105,92 +109,92 @@ app.get(
   '/api/tasks/:taskId/events',
   requireAuthMiddleware,
   (c: Context<AppEnv>) => {
-    const taskId = c.req.param('taskId')
-    pinoLogger.info(`SSE connection opened for task: ${taskId}`)
-    return streamSSE(
-      c,
-      async (stream: SSEStreamingApi) => {
-        let isConnected = true
-        const notifier: TaskProgressNotifier = {
-          emit: (event, data) => {
-            if (isConnected) {
-              try {
-                const dataString =
-                  typeof data === 'string' ? data : JSON.stringify(data)
-                stream.writeSSE({
-                  event,
-                  data: dataString,
+  const taskId = c.req.param('taskId')
+  pinoLogger.info(`SSE connection opened for task: ${taskId}`)
+  return streamSSE(
+    c,
+    async (stream: SSEStreamingApi) => {
+      let isConnected = true
+      const notifier: TaskProgressNotifier = {
+        emit: (event, data) => {
+          if (isConnected) {
+            try {
+              const dataString =
+                typeof data === 'string' ? data : JSON.stringify(data)
+              stream.writeSSE({
+                event,
+                data: dataString,
                   id: `${Date.now()}-${Math.random()}`,
-                })
-              } catch (e) {
-                pinoLogger.error(
-                  { taskId, event, data, err: e },
-                  'Failed to stringify or write SSE data',
-                )
-              }
+              })
+            } catch (e) {
+              pinoLogger.error(
+                { taskId, event, data, err: e },
+                'Failed to stringify or write SSE data',
+              )
             }
-          },
-          connClosed: false,
-        }
-        sseConnections.set(taskId, notifier)
-        pinoLogger.debug(
-          `Notifier set for task ${taskId}. Total connections: ${sseConnections.size}`,
-        )
+          }
+        },
+        connClosed: false,
+      }
+      sseConnections.set(taskId, notifier)
+      pinoLogger.debug(
+        `Notifier set for task ${taskId}. Total connections: ${sseConnections.size}`,
+      )
 
-        const progressListener = (data: unknown) => {
-          pinoLogger.debug(`Received progress for task ${taskId}`, { data })
-          notifier.emit('progress', data)
-        }
-        progressEmitter.on(`progress-${taskId}`, progressListener)
+      const progressListener = (data: unknown) => {
+        pinoLogger.debug(`Received progress for task ${taskId}`, { data })
+        notifier.emit('progress', data)
+      }
+      progressEmitter.on(`progress-${taskId}`, progressListener)
 
-        const completionListener = (data: unknown) => {
-          pinoLogger.info(`Task ${taskId} completed`, { data })
-          notifier.emit('complete', data)
+      const completionListener = (data: unknown) => {
+        pinoLogger.info(`Task ${taskId} completed`, { data })
+        notifier.emit('complete', data)
           isConnected = false
-        }
-        progressEmitter.on(`complete-${taskId}`, completionListener)
+      }
+      progressEmitter.on(`complete-${taskId}`, completionListener)
 
-        const errorListener = (data: unknown) => {
-          pinoLogger.error(`Task ${taskId} failed`, { data })
-          notifier.emit('error', data)
+      const errorListener = (data: unknown) => {
+        pinoLogger.error(`Task ${taskId} failed`, { data })
+        notifier.emit('error', data)
           isConnected = false
-        }
-        progressEmitter.on(`error-${taskId}`, errorListener)
+      }
+      progressEmitter.on(`error-${taskId}`, errorListener)
 
-        while (isConnected) {
+      while (isConnected) {
           await stream.writeSSE({
             event: 'ping',
             data: new Date().toISOString(),
           })
           await delay(20000)
-          if (notifier.connClosed) {
-            isConnected = false
-          }
+        if (notifier.connClosed) {
+          isConnected = false
         }
+      }
 
-        pinoLogger.info(`SSE stream closing naturally for task: ${taskId}`)
-        progressEmitter.off(`progress-${taskId}`, progressListener)
-        progressEmitter.off(`complete-${taskId}`, completionListener)
-        progressEmitter.off(`error-${taskId}`, errorListener)
-        sseConnections.delete(taskId)
-        pinoLogger.debug(
-          `Notifier removed for task ${taskId}. Total connections: ${sseConnections.size}`,
-        )
-      },
+      pinoLogger.info(`SSE stream closing naturally for task: ${taskId}`)
+      progressEmitter.off(`progress-${taskId}`, progressListener)
+      progressEmitter.off(`complete-${taskId}`, completionListener)
+      progressEmitter.off(`error-${taskId}`, errorListener)
+      sseConnections.delete(taskId)
+      pinoLogger.debug(
+        `Notifier removed for task ${taskId}. Total connections: ${sseConnections.size}`,
+      )
+    },
       async (err: Error) => {
         const taskId = c.req.param('taskId')
-        pinoLogger.warn(
-          { err: err.message, taskId },
-          'SSE stream error or client disconnected',
-        )
-        const notifier = sseConnections.get(taskId)
-        if (notifier) {
+      pinoLogger.warn(
+        { err: err.message, taskId },
+        'SSE stream error or client disconnected',
+      )
+      const notifier = sseConnections.get(taskId)
+      if (notifier) {
           notifier.connClosed = true
-        }
+      }
       },
     )
-  },
-)
+    },
+  )
 
 // Global Error Handler
 app.onError((err, c) => {
@@ -242,7 +246,7 @@ const startServer = async () => {
   const port = Number(process.env.PORT) || 8080
   if (process.env.NODE_ENV !== 'test') {
     serve({ fetch: app.fetch, port: port }, (info) => {
-      pinoLogger.info(`🚀 Server listening on http://localhost:${info.port}`)
+        pinoLogger.info(`🚀 Server listening on http://localhost:${info.port}`)
     })
   }
 }

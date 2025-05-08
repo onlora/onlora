@@ -1,5 +1,7 @@
+import { apiClient } from './apiClient' // Import the new client
+
 // Define message structure (matching backend schema roughly)
-// TODO: Move to a shared types definition
+// TODO: Move to a shared types definition (or to apiTypes.ts)
 export interface MessageImage {
   id: number
   url: string
@@ -15,44 +17,14 @@ export interface Message {
   created_at: string
 }
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api'
+// API_BASE_URL is now in apiClient.ts
 
 /**
  * Fetches messages for a specific Jam session.
- * Requires authentication cookie to be sent automatically by the browser.
  */
 export const getJamMessages = async (jamId: string): Promise<Message[]> => {
-  const response = await fetch(`${API_BASE_URL}/jams/${jamId}/messages`, {
-    method: 'GET',
-    headers: {
-      // Authentication is handled by cookies, no explicit Authorization header needed here
-      // if using HttpOnly cookies set by the backend.
-      'Content-Type': 'application/json',
-    },
-  })
-
-  if (!response.ok) {
-    // Attempt to parse error body for more details
-    let errorBody: unknown // Use unknown for safer type handling
-    try {
-      errorBody = await response.json()
-    } catch (e) {
-      // Ignore if response body is not JSON
-    }
-    console.error('API Error fetching messages:', response.status, errorBody)
-    throw new Error(
-      // Type guard to safely access message property
-      typeof errorBody === 'object' &&
-        errorBody !== null &&
-        'message' in errorBody &&
-        typeof errorBody.message === 'string'
-        ? errorBody.message
-        : `Failed to fetch messages (status ${response.status})`,
-    )
-  }
-
-  return response.json() as Promise<Message[]>
+  return apiClient<Message[]>(`/jams/${jamId}/messages`)
+  // Error handling is now managed by apiClient
 }
 
 // --- Generate Image --- //
@@ -70,67 +42,27 @@ export interface GenerateImageResponse {
   taskId: string
 }
 
-// Type for API error responses (matching backend structure)
-export interface ApiErrorResponse {
-  code: number
-  message: string
-  currentVE?: number
-  requiredVE?: number
-  // Potentially add Zod error details field if backend sends them
-}
+// ApiErrorResponse is now imported from apiClient.ts
 
 /**
  * Sends a request to generate an image for a specific Jam.
- * Requires authentication cookie.
  */
 export const generateImageForJam = async (
   jamId: string,
   payload: GenerateImagePayload,
 ): Promise<GenerateImageResponse> => {
-  const response = await fetch(`${API_BASE_URL}/jams/${jamId}/generate`, {
+  return apiClient<GenerateImageResponse>(`/jams/${jamId}/generate`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
+    body: payload, // apiClient handles JSON.stringify for non-FormData
   })
-
-  if (!response.ok) {
-    let errorBody: unknown
-    try {
-      errorBody = await response.json()
-    } catch (e) {
-      /* Ignore */
-    }
-
-    console.error('API Error generating image:', response.status, errorBody)
-
-    // Check if it's a structured API error
-    if (
-      typeof errorBody === 'object' &&
-      errorBody !== null &&
-      'message' in errorBody &&
-      typeof errorBody.message === 'string'
-    ) {
-      // Re-throw with the structured error body if possible
-      const apiError = new Error(errorBody.message) as Error &
-        Partial<ApiErrorResponse>
-      // Add extra properties from the error response if they exist
-      if ('code' in errorBody && typeof errorBody.code === 'number')
-        apiError.code = errorBody.code
-      if ('currentVE' in errorBody && typeof errorBody.currentVE === 'number')
-        apiError.currentVE = errorBody.currentVE
-      if ('requiredVE' in errorBody && typeof errorBody.requiredVE === 'number')
-        apiError.requiredVE = errorBody.requiredVE
-      throw apiError
-    }
-
-    // Fallback generic error
-    throw new Error(`Failed to generate image (status ${response.status})`)
-  }
-
-  // Status 202 Accepted returns { taskId: string }
-  return response.json() as Promise<GenerateImageResponse>
+  // Error handling and structured error creation are now managed by apiClient
 }
 
 // TODO: Add functions for creating jams, etc.
+// Example for creating a jam (assuming it returns { jamId: number }):
+// export interface CreateJamResponse {
+//   jamId: number;
+// }
+// export const createJam = async (): Promise<CreateJamResponse> => {
+//   return apiClient<CreateJamResponse>('/jams', { method: 'POST' });
+// };

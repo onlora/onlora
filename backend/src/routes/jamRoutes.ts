@@ -4,21 +4,18 @@ import { pino } from 'pino' // Assuming pino is used for logging, adjust if glob
 import { z } from 'zod'
 
 import crypto from 'node:crypto' // For generating taskId
-import { eq, sql } from 'drizzle-orm'
+import { sql } from 'drizzle-orm'
 import { REQUIRED_VE_FOR_GENERATION } from '../config/constants' // Import the constant
 import { GEN_TASK_QUEUE_NAME, type GenTaskPayload } from '../config/queues'
 import { db } from '../db'
-import {
-  jams,
-  messages as messagesTable,
-  users as usersTable,
-  veTxns,
-} from '../db/schema' // usersTable for VE check, messagesTable
+import { jams, messages as messagesTable } from '../db/schema' // usersTable for VE check, messagesTable
+import { verifyUserJamOwnership } from '../lib/dbUtils' // Import new helper
 import jobQueue from '../lib/jobQueue' // pg-boss instance
 import {
   type AuthenticatedContextEnv,
   requireAuthMiddleware,
 } from '../middleware/auth'
+import { deductVibeEnergy } from '../services/veService' // Import new VE service
 // Import other necessary things like pg-boss types/instance if needed for generate route later
 
 // Define AppEnv specifically for jamRoutes, extending AuthenticatedContextEnv
@@ -48,6 +45,21 @@ type GenerateImageResponse =
   | { code: number; message: string; currentVE?: number; requiredVE?: number }
   | { code: number; message: string } // Generic error
 
+// Define a type for valid HTTP status codes used in this module
+// These are typically ContentfulStatusCodes in Hono context.
+type ValidHttpStatusCodes =
+  | 200
+  | 201
+  | 202
+  | 400
+  | 401
+  | 402
+  | 403
+  | 404
+  | 422
+  | 500
+  | 503
+
 const jamApp = new Hono<JamRoutesAppEnv>()
 
 // Re-initialize pinoLogger for this route module or import a shared one
@@ -75,8 +87,8 @@ jamApp.post(
         {
           code: 500,
           message: 'Internal server error: User authentication data missing.',
-        } as GenerateImageResponse,
-        500,
+        },
+        500 as ValidHttpStatusCodes,
       )
     }
 
@@ -96,14 +108,14 @@ jamApp.post(
             code: 500,
             message: 'Failed to create jam session',
           } as GenerateImageResponse,
-          500,
+          500 as ValidHttpStatusCodes,
         )
       }
       pinoLogger.info(
         { userId: user.id, jamId: newJam[0].id },
         'New jam created',
       )
-      return c.json({ jamId: newJam[0].id }, 201)
+      return c.json({ jamId: newJam[0].id }, 201 as ValidHttpStatusCodes)
     } catch (error) {
       pinoLogger.error(
         { err: error, userId: user.id },
@@ -114,7 +126,7 @@ jamApp.post(
           code: 500,
           message: 'Internal server error while creating jam',
         } as GenerateImageResponse,
-        500,
+        500 as ValidHttpStatusCodes,
       )
     }
   },
@@ -139,113 +151,81 @@ jamApp.post(
           code: 500,
           message: 'Internal server error: User authentication data missing.',
         },
-        500,
+        500 as ValidHttpStatusCodes,
       )
     }
 
-    const jamId = c.req.param('jamId')
+    const jamIdString = c.req.param('jamId')
+    const jamId = Number.parseInt(jamIdString, 10)
+
+    if (Number.isNaN(jamId)) {
+      return c.json(
+        { code: 400, message: 'Invalid Jam ID format.' },
+        400 as ValidHttpStatusCodes,
+      )
+    }
+
     const validatedBody = c.req.valid('json' as never) as z.infer<
       typeof generateImageRequestBodySchema
     >
-    // const REQUIRED_VE_FOR_GENERATION = 6 // Use imported constant
-
-    let userHadSufficientVE = false // Flag to ensure VE deduction was attempted and potentially succeeded
 
     try {
-      const userRecord = await db
-        .select({ vibeEnergy: usersTable.vibe_energy })
-        .from(usersTable)
-        .where(eq(usersTable.id, user.id))
-        .limit(1)
+      // Verify jam ownership (optional, depends on if generation should be tied to owning the jam)
+      // For now, we assume a user can generate for any jamId they have, linking via prompt.
+      // If strict ownership is needed:
+      // const ownership = await verifyUserJamOwnership(user.id, jamId);
+      // if (!ownership.jamExists) {
+      //   return c.json({ code: 404, message: 'Jam session not found.' }, 404);
+      // }
+      // if (!ownership.isOwner) {
+      //   logger.warn({ userId: user.id, jamId }, "User tried to generate for a jam they don't own.");
+      //   return c.json({ code: 403, message: 'Forbidden.' }, 403);
+      // }
 
-      if (!userRecord || userRecord.length === 0) {
-        pinoLogger.error(
-          { userId: user.id },
-          'User not found in database for VE check',
-        )
-        return c.json({ code: 404, message: 'User not found' }, 404)
-      }
+      // Step 1 & 2: Check and Deduct Vibe Energy using veService
+      const veResult = await deductVibeEnergy(
+        user.id,
+        REQUIRED_VE_FOR_GENERATION,
+        'generate',
+        jamId, // Using jamId as refId for VE txn for now
+      )
 
-      const currentVE = userRecord[0].vibeEnergy
-      if (currentVE < REQUIRED_VE_FOR_GENERATION) {
+      if (!veResult.success) {
         pinoLogger.warn(
           {
             userId: user.id,
-            currentVE,
-            requiredVE: REQUIRED_VE_FOR_GENERATION,
+            currentVE: veResult.currentVE,
+            requiredVE: veResult.requiredVE,
+            message: veResult.message,
           },
-          'Insufficient VE',
+          'Vibe Energy deduction failed.',
         )
         return c.json(
           {
-            code: 402,
-            message: 'Insufficient Vibe Energy.',
-            currentVE,
-            requiredVE: REQUIRED_VE_FOR_GENERATION,
-          },
-          402,
-        )
-      }
-      pinoLogger.info({ userId: user.id, currentVE }, 'Sufficient VE.')
-
-      // Step 2: Atomically deduct VE
-      const updateResult = await db
-        .update(usersTable)
-        .set({
-          vibe_energy: sql`${usersTable.vibe_energy} - ${REQUIRED_VE_FOR_GENERATION}`,
-        })
-        .where(eq(usersTable.id, user.id))
-        .returning({ vibeEnergy: usersTable.vibe_energy })
-
-      if (
-        !updateResult ||
-        updateResult.length === 0 ||
-        updateResult[0].vibeEnergy === undefined
-      ) {
-        pinoLogger.error(
-          { userId: user.id },
-          'Failed to deduct VE from user account.',
-        )
-        return c.json(
-          { code: 500, message: 'Error processing Vibe Energy update.' },
-          500,
+            code: (veResult.statusCode || 400) as number, // Keep original body code as number
+            message: veResult.message || 'Failed to process Vibe Energy.',
+            ...(veResult.currentVE !== undefined && {
+              currentVE: veResult.currentVE,
+            }),
+            ...(veResult.requiredVE !== undefined && {
+              requiredVE: veResult.requiredVE,
+            }),
+          } as GenerateImageResponse,
+          (veResult.statusCode || 400) as ValidHttpStatusCodes,
         )
       }
 
       pinoLogger.info(
-        { userId: user.id, newVE: updateResult[0].vibeEnergy },
-        'Vibe Energy deducted successfully.',
-      )
-      userHadSufficientVE = true // Mark that VE processing reached this point
-
-      // Step 2b: Record VE transaction in veTxns table
-      await db.insert(veTxns).values({
-        userId: user.id,
-        delta: -REQUIRED_VE_FOR_GENERATION, // Negative value for deduction
-        reason: 'generate',
-        refId: Number.parseInt(jamId, 10), // Assuming jamId is a number after parsing. Or could be taskId.
-        // db_schema.md shows veTxns.ref_id as BIGINT.
-        // If jamId is not suitable, we might need the upcoming taskId.
-        // For now, using jamId if it's numeric. Ensure it fits BIGINT.
-      })
-
-      pinoLogger.info(
-        {
-          userId: user.id,
-          change: -REQUIRED_VE_FOR_GENERATION,
-          reason: 'generate',
-          ref: jamId,
-        },
-        'VE transaction recorded',
+        { userId: user.id, newVE: veResult.newVE },
+        'Vibe Energy processed successfully for image generation.',
       )
 
       // Step 2c: Store user's prompt message
       try {
         await db.insert(messagesTable).values({
-          jamId: Number.parseInt(jamId, 10),
+          jamId: jamId, // Use parsed jamId
           role: 'user',
           text: validatedBody.prompt,
-          // images will be null/undefined for user text messages
         })
         pinoLogger.info(
           { userId: user.id, jamId, prompt: validatedBody.prompt },
@@ -256,8 +236,6 @@ jamApp.post(
           { err: msgError, userId: user.id, jamId },
           'Failed to store user prompt message. Proceeding with generation.',
         )
-        // Not returning an error to the client for this, as generation can still proceed.
-        // However, this indicates a data consistency issue that should be monitored.
       }
 
       // Step 3: Publish task to pg-boss
@@ -271,14 +249,14 @@ jamApp.post(
             code: 503,
             message: 'Image generation service temporarily unavailable.',
           },
-          503,
+          503 as ValidHttpStatusCodes,
         )
       }
 
       const taskId = crypto.randomUUID()
       const jobPayload: GenTaskPayload = {
         taskId,
-        jamId: jamId, // jamId from path param (string)
+        jamId: jamId.toString(), // Convert number jamId to string for payload
         prompt: validatedBody.prompt,
         model: validatedBody.modelId, // Renaming to model as per GenTaskPayload
         size: validatedBody.size,
@@ -293,7 +271,7 @@ jamApp.post(
       )
 
       // Step 4: Return taskId
-      return c.json({ taskId: taskId }, 202) // 202 Accepted
+      return c.json({ taskId: taskId }, 202 as ValidHttpStatusCodes) // 202 Accepted
     } catch (error) {
       pinoLogger.error(
         { err: error, userId: user?.id },
@@ -305,7 +283,7 @@ jamApp.post(
       // if (userHadSufficientVE && user && user.id) { /* TODO: Add VE refund logic here if error after deduction */ }
       return c.json(
         { code: 500, message: 'Internal server error during image generation' },
-        500,
+        500 as ValidHttpStatusCodes,
       )
     }
   },
@@ -317,40 +295,55 @@ jamApp.get(
   requireAuthMiddleware,
   async (c: Context<AuthenticatedContextEnv>) => {
     const user = c.get('user')
+    if (!user || !user.id) {
+      pinoLogger.error(
+        { path: c.req.path },
+        'User object or user.id missing from context after requireAuthMiddleware.',
+      )
+      return c.json(
+        {
+          code: 500, // Or 401, but middleware should have caught it.
+          message: 'Internal server error: User authentication data missing.',
+        },
+        500 as ValidHttpStatusCodes,
+      )
+    }
+
     const jamId = Number.parseInt(c.req.param('jamId'), 10)
 
     if (Number.isNaN(jamId)) {
-      return c.json({ code: 400, message: 'Invalid Jam ID' }, 400)
-    }
-
-    if (!user || !user.id) {
-      // This should technically be caught by requireAuthMiddleware, but belts and suspenders
-      return c.json({ code: 401, message: 'Unauthorized' }, 401)
+      return c.json(
+        { code: 400, message: 'Invalid Jam ID format' },
+        400 as ValidHttpStatusCodes,
+      )
     }
 
     try {
-      // 1. Verify the jam exists and belongs to the user
-      const jam = await db
-        .select({ id: jams.id, userId: jams.userId })
-        .from(jams)
-        .where(sql`${jams.id} = ${jamId}`)
-        .limit(1)
+      const { jamExists, isOwner, jam } = await verifyUserJamOwnership(
+        user.id,
+        jamId,
+      )
 
-      if (!jam || jam.length === 0) {
-        return c.json({ code: 404, message: 'Jam session not found' }, 404)
+      if (!jamExists) {
+        return c.json(
+          { code: 404, message: 'Jam session not found' },
+          404 as ValidHttpStatusCodes,
+        )
       }
 
-      if (jam[0].userId !== user.id) {
+      if (!isOwner) {
         pinoLogger.warn(
           {
             requestedJamId: jamId,
             actualUserId: user.id,
-            ownerUserId: jam[0].userId,
+            ownerUserId: jam?.userId, // jam will exist if jamExists is true
           },
           'User attempted to access messages for a jam they do not own.',
         )
-        // Return 404 instead of 403 to avoid revealing existence
-        return c.json({ code: 404, message: 'Jam session not found' }, 404)
+        return c.json(
+          { code: 404, message: 'Jam session not found' },
+          404 as ValidHttpStatusCodes,
+        ) // Keep 404 for privacy
       }
 
       // 2. Fetch messages for the jam, ordered by creation time
@@ -364,7 +357,7 @@ jamApp.get(
         { userId: user.id, jamId, messageCount: messages.length },
         `Fetched messages for jam ${jamId}`,
       )
-      return c.json(messages, 200)
+      return c.json(messages, 200 as ValidHttpStatusCodes)
     } catch (error) {
       pinoLogger.error(
         { err: error, userId: user.id, jamId },
@@ -372,7 +365,7 @@ jamApp.get(
       )
       return c.json(
         { code: 500, message: 'Internal server error fetching messages' },
-        500,
+        500 as ValidHttpStatusCodes,
       )
     }
   },

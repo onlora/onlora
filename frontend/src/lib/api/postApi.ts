@@ -1,5 +1,5 @@
 import type { PostVisibility } from '@/components/jam/PublishSheet' // Assuming this type is 'public' | 'private'
-import type { ApiErrorResponse } from './jamApi' // Re-use error structure if applicable
+import { apiClient } from './apiClient' // Import new client and error type
 
 export interface CreatePostPayload {
   title: string
@@ -8,6 +8,10 @@ export interface CreatePostPayload {
   visibility: PostVisibility
   imageIds: number[]
   jamId?: number // Optional: to link posts to the jam session they originated from
+  // Remix fields
+  parentPostId?: number
+  rootPostId?: number
+  generation?: number
 }
 
 export interface CreatePostResponse {
@@ -18,36 +22,11 @@ export interface CreatePostResponse {
 export async function createPost(
   payload: CreatePostPayload,
 ): Promise<CreatePostResponse> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api'
-  const response = await fetch(`${apiUrl}/posts`, {
+  return apiClient<CreatePostResponse, CreatePostPayload>('/posts', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(payload),
+    credentials: 'include', // Keep credentials if needed for the endpoint
+    body: payload,
   })
-
-  if (!response.ok) {
-    let errorData: ApiErrorResponse
-    try {
-      errorData = await response.json()
-    } catch (e) {
-      // If response is not JSON, use status text or a generic message
-      throw new Error(
-        `Failed to create post: ${response.status} ${response.statusText || 'Server error'}`,
-      )
-    }
-    // Throw an error that includes backend-provided details if available
-    const error = new Error(
-      errorData.message ||
-        `Failed to create post: ${response.status} ${errorData.code || 'Unknown error'}`,
-    ) as Error & Partial<ApiErrorResponse> // Augment error type
-    error.code = errorData.code
-    throw error
-  }
-
-  return response.json() as Promise<CreatePostResponse>
 }
 
 // Type definition for the response of GET /api/posts/:postId
@@ -92,33 +71,9 @@ export async function getPostDetails(postId: string): Promise<PostDetails> {
   if (!postId || Number.isNaN(Number(postId))) {
     throw new Error('Invalid Post ID provided.')
   }
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api'
-  const response = await fetch(`${apiUrl}/posts/${postId}`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include', // Send cookies for potential auth checks (e.g., private posts)
+  return apiClient<PostDetails>(`/posts/${postId}`, {
+    credentials: 'include',
   })
-
-  if (!response.ok) {
-    let errorData: ApiErrorResponse
-    try {
-      errorData = await response.json()
-    } catch (e) {
-      throw new Error(
-        `Failed to fetch post details: ${response.status} ${response.statusText || 'Server error'}`,
-      )
-    }
-    const error = new Error(
-      errorData.message ||
-        `Failed to fetch post details: ${response.status} ${errorData.code || 'Unknown error'}`,
-    ) as Error & Partial<ApiErrorResponse>
-    error.code = errorData.code
-    throw error
-  }
-
-  return response.json() as Promise<PostDetails>
 }
 
 // --- Like/Unlike Post --- //
@@ -138,34 +93,30 @@ export async function toggleLikePost(
   if (!postId || Number.isNaN(Number(postId))) {
     throw new Error('Invalid Post ID provided.')
   }
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api'
-  const response = await fetch(`${apiUrl}/posts/${postId}/like`, {
+  return apiClient<ToggleLikeResponse>(`/posts/${postId}/like`, {
     method: 'POST',
-    headers: {
-      // Content-Type might not be strictly needed for a POST without a body,
-      // but can be included. Authorization is handled by credentials: 'include' (cookies).
-      'Content-Type': 'application/json',
-    },
     credentials: 'include',
-    // No body needed for this toggle endpoint
   })
+}
 
-  if (!response.ok) {
-    let errorData: ApiErrorResponse
-    try {
-      errorData = await response.json()
-    } catch (e) {
-      throw new Error(
-        `Failed to toggle like: ${response.status} ${response.statusText || 'Server error'}`,
-      )
-    }
-    const error = new Error(
-      errorData.message ||
-        `Failed to toggle like: ${response.status} ${errorData.code || 'Unknown error'}`,
-    ) as Error & Partial<ApiErrorResponse>
-    error.code = errorData.code
-    throw error
+// --- Get Post Clone Info (for Remix) --- //
+
+export interface PostCloneInfo {
+  prompt: string | null
+  model: string | null
+  parentPostId: number
+  rootPostId: number
+  generation: number
+}
+
+/**
+ * Fetches information needed to start remixing a post.
+ */
+export async function getPostCloneInfo(postId: string): Promise<PostCloneInfo> {
+  if (!postId || Number.isNaN(Number(postId))) {
+    throw new Error('Invalid Post ID provided for cloning.')
   }
-
-  return response.json() as Promise<ToggleLikeResponse>
+  return apiClient<PostCloneInfo>(`/posts/${postId}/clone`, {
+    credentials: 'include',
+  })
 }

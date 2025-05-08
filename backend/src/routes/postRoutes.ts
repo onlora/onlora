@@ -30,6 +30,10 @@ const createPostSchema = z.object({
     .min(1, 'At least one image is required')
     .max(10), // Max 10 images per post
   jamId: z.number().int().positive().optional(), // Optional: to link post back to its origin jam
+  // Remix-specific fields (optional)
+  parentPostId: z.number().int().positive().optional(),
+  rootPostId: z.number().int().positive().optional(),
+  generation: z.number().int().nonnegative().optional(),
 })
 
 // Define the specific type for the validated data from this schema
@@ -107,14 +111,15 @@ interface CommentWithUser {
 postRoutes.post(
   '/',
   requireAuthMiddleware,
-  // Keep zValidator for automatic 400 on invalid shape, but parse manually for type safety
-  zValidator('json', createPostSchema, (result, c) => {
+  // Remove explicit type for result, let TS infer. Keep explicit return type.
+  zValidator('json', createPostSchema, (result, c): Response | undefined => {
     if (!result.success) {
       return c.json(
         { error: 'Validation failed', details: result.error.flatten() },
         400,
       )
     }
+    return undefined
   }),
   async (c: Context<PostRoutesAppEnv>) => {
     const user = c.get('user')
@@ -140,6 +145,7 @@ postRoutes.post(
       const coverImgUrl = coverImageRecord.url
 
       const result = await db.transaction(async (tx) => {
+        // 1. Insert the new post
         const [newPost] = await tx
           .insert(posts)
           .values({
@@ -149,6 +155,11 @@ postRoutes.post(
             tags: payload.tags,
             visibility: payload.visibility,
             coverImg: coverImgUrl,
+            jamSessionId: payload.jamId,
+            // Add remix fields if they exist
+            parentPostId: payload.parentPostId,
+            rootPostId: payload.rootPostId,
+            generation: payload.generation,
           })
           .returning({ id: posts.id })
 
@@ -157,28 +168,71 @@ postRoutes.post(
         }
         const postId = newPost.id
 
+        // 2. Link images to the post
         const postImageEntries = payload.imageIds.map((imageId) => ({
           postId: postId,
           imageId: imageId,
         }))
         await tx.insert(postImages).values(postImageEntries)
 
+        // 3. Handle VE grant for public post
         if (payload.visibility === 'public') {
-          const veGrant = 2
+          const veGrantPublic = 2
           await tx
             .update(users)
-            .set({
-              vibe_energy: sql`${users.vibe_energy} + ${veGrant}`,
-            })
+            .set({ vibe_energy: sql`${users.vibe_energy} + ${veGrantPublic}` })
             .where(eq(users.id, userId))
 
           await tx.insert(veTxns).values({
             userId: userId,
-            delta: veGrant,
+            delta: veGrantPublic,
             reason: 'Published public post',
             refId: postId,
           })
         }
+
+        // 4. Handle Remix-specific updates (if parentPostId is provided)
+        if (payload.parentPostId) {
+          // Find the parent post author ID
+          const parentPost = await tx.query.posts.findFirst({
+            where: eq(posts.id, payload.parentPostId),
+            columns: { authorId: true },
+          })
+          if (!parentPost || !parentPost.authorId) {
+            // Throw error or handle case where parent post/author is missing
+            console.warn(
+              `Parent post ${payload.parentPostId} or its author not found during remix processing.`,
+            )
+            // Depending on desired behavior, you might throw an error here to rollback
+            // throw new Error(`Parent post ${payload.parentPostId} not found`);
+          } else {
+            const parentAuthorId = parentPost.authorId
+            const veGrantRemix = 1
+
+            // Increment remix_count on parent post
+            await tx
+              .update(posts)
+              .set({ remixCount: sql`${posts.remixCount} + 1` })
+              .where(eq(posts.id, payload.parentPostId))
+
+            // Grant VE to parent post author
+            await tx
+              .update(users)
+              .set({ vibe_energy: sql`${users.vibe_energy} + ${veGrantRemix}` })
+              .where(eq(users.id, parentAuthorId))
+
+            // Record VE transaction for parent author
+            await tx.insert(veTxns).values({
+              userId: parentAuthorId,
+              delta: veGrantRemix,
+              reason: 'Remix source', // Or 'Work Remixed'
+              refId: payload.parentPostId, // Link to the parent post
+            })
+            // Optional: Record VE transaction for the remixer (if any cost/reward)
+            // await tx.insert(veTxns).values({ userId: userId, delta: 0, reason: 'Remixed post', refId: postId });
+          }
+        }
+
         return { postId }
       })
 
@@ -479,6 +533,109 @@ postRoutes.get(
     } catch (error) {
       console.error(`Error fetching comments for post ${postId}:`, error)
       throw new HTTPException(500, { message: 'Failed to fetch comments' })
+    }
+  },
+)
+
+// GET /api/posts/:postId/clone - Get information to clone/remix a post
+postRoutes.get(
+  '/:postId/clone',
+  requireAuthMiddleware,
+  zValidator('param', postIdParamSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid Post ID format',
+        cause: result.error,
+      })
+    }
+  }),
+  async (c: Context<PostRoutesAppEnv>) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      // Should be caught by requireAuthMiddleware, but as a safeguard
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+
+    let postId: number
+    try {
+      const params = postIdParamSchema.parse(c.req.param())
+      postId = params.postId
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        throw new HTTPException(400, {
+          message: 'Invalid Post ID format',
+          cause: error,
+        })
+      }
+      // For other unexpected errors during param parsing
+      throw new HTTPException(400, { message: 'Invalid request parameters' })
+    }
+
+    try {
+      // 1. Fetch the source post
+      const sourcePost = await db.query.posts.findFirst({
+        where: eq(posts.id, postId),
+        columns: {
+          id: true,
+          coverImg: true,
+          parentPostId: true,
+          rootPostId: true,
+          generation: true,
+          visibility: true,
+          // Potentially authorId if we need to check ownership for non-public posts, though remixing usually implies public.
+        },
+      })
+
+      if (!sourcePost) {
+        throw new HTTPException(404, { message: 'Source post not found' })
+      }
+
+      // For now, let's assume only public posts can be remixed.
+      // This can be adjusted based on product requirements.
+      if (sourcePost.visibility !== 'public') {
+        throw new HTTPException(403, {
+          message: 'Only public posts can be remixed',
+        })
+      }
+
+      // 2. Find prompt and model for the cover image
+      let imagePrompt: string | null = null
+      let imageModel: string | null = null
+
+      if (sourcePost.coverImg) {
+        const coverImageDetails = await db.query.images.findFirst({
+          where: eq(images.url, sourcePost.coverImg),
+          columns: { prompt: true, model: true },
+        })
+        if (coverImageDetails) {
+          imagePrompt = coverImageDetails.prompt
+          imageModel = coverImageDetails.model
+        }
+      }
+
+      // 3. Determine rootPostId and generation
+      const parentPostIdForRemix = sourcePost.id
+      const rootPostIdForRemix = sourcePost.rootPostId ?? sourcePost.id // If no root, this is the root
+      const currentGeneration = sourcePost.generation ?? 0 // Assume 0 if null
+      const nextGeneration = currentGeneration + 1
+
+      const cloneInfo = {
+        prompt: imagePrompt,
+        model: imageModel,
+        parentPostId: parentPostIdForRemix,
+        rootPostId: rootPostIdForRemix,
+        generation: nextGeneration,
+      }
+
+      return c.json(cloneInfo, 200)
+    } catch (error) {
+      if (error instanceof HTTPException) {
+        throw error // Re-throw known HTTP errors
+      }
+      console.error(`Error fetching post clone info for post ${postId}:`, error)
+      throw new HTTPException(500, {
+        message: 'Failed to fetch post clone information',
+      })
     }
   },
 )

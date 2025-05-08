@@ -39,21 +39,21 @@ const jobQueue = connectionString ? new PgBoss(bossConstructorOptions) : null
 
 // General error handler for pg-boss
 if (jobQueue) {
-  jobQueue.on('error', (error: unknown) => {
-    if (error instanceof Error) {
-      logger.error(
+jobQueue.on('error', (error: unknown) => {
+  if (error instanceof Error) {
+    logger.error(
         {
           err: { message: error.message, stack: error.stack, name: error.name },
         },
-        'Job queue encountered an error',
-      )
-    } else {
-      logger.error(
-        { errorObject: error },
-        'Job queue encountered an unknown error object',
-      )
-    }
-  })
+      'Job queue encountered an error',
+    )
+  } else {
+    logger.error(
+      { errorObject: error },
+      'Job queue encountered an unknown error object',
+    )
+  }
+})
 }
 
 // Commenting out specific error event handlers for now to resolve typing issues

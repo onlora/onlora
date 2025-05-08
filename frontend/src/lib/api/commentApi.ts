@@ -1,4 +1,4 @@
-import type { ApiErrorResponse } from './jamApi' // Re-use error structure
+import { apiClient } from './apiClient' // Import new client and error type
 
 // --- Types --- //
 
@@ -28,8 +28,7 @@ export interface CreateCommentPayload {
   parentId?: number // For replies
 }
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api'
+// API_BASE_URL is now in apiClient.ts
 
 // --- API Functions --- //
 
@@ -42,32 +41,7 @@ export async function getComments(
   if (!postId || Number.isNaN(Number(postId))) {
     throw new Error('Invalid Post ID provided.')
   }
-  const response = await fetch(`${API_BASE_URL}/posts/${postId}/comments`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    // No credentials needed if comments are public
-    // credentials: 'include',
-  })
-
-  if (!response.ok) {
-    // Handle errors similar to other API calls
-    let errorData: ApiErrorResponse
-    try {
-      errorData = await response.json()
-    } catch (e) {
-      throw new Error(
-        `Failed to fetch comments: ${response.status} ${response.statusText || 'Server error'}`,
-      )
-    }
-    const error = new Error(
-      errorData.message || `Failed to fetch comments: ${response.status}`,
-    ) as Error & Partial<ApiErrorResponse>
-    error.code = errorData.code
-    throw error
-  }
-  return response.json() as Promise<CommentWithAuthor[]>
+  return apiClient<CommentWithAuthor[]>(`/posts/${postId}/comments`)
 }
 
 /**
@@ -76,31 +50,9 @@ export async function getComments(
 export async function createComment(
   payload: CreateCommentPayload,
 ): Promise<CommentWithAuthor> {
-  const response = await fetch(`${API_BASE_URL}/comments`, {
+  return apiClient<CommentWithAuthor, CreateCommentPayload>('/comments', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     credentials: 'include', // Required for posting comments
-    body: JSON.stringify(payload),
+    body: payload,
   })
-
-  if (!response.ok) {
-    // Handle errors
-    let errorData: ApiErrorResponse
-    try {
-      errorData = await response.json()
-    } catch (e) {
-      throw new Error(
-        `Failed to create comment: ${response.status} ${response.statusText || 'Server error'}`,
-      )
-    }
-    const error = new Error(
-      errorData.message || `Failed to create comment: ${response.status}`,
-    ) as Error & Partial<ApiErrorResponse>
-    error.code = errorData.code
-    throw error
-  }
-  // Backend returns the created comment, potentially with author info added
-  return response.json() as Promise<CommentWithAuthor>
 }

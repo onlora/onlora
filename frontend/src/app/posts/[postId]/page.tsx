@@ -6,6 +6,7 @@ import {
   Bookmark,
   Eye,
   Heart,
+  Loader2,
   MessageSquare,
   MoreHorizontal,
   Repeat,
@@ -40,6 +41,7 @@ import {
 import {
   type PostDetails,
   type ToggleLikeResponse,
+  getPostCloneInfo,
   getPostDetails,
   toggleLikePost,
 } from '@/lib/api/postApi'
@@ -69,6 +71,8 @@ export default function PostDetailPage() {
     name: string | null
     image: string | null
   } | null>(null)
+
+  const [isRemixing, setIsRemixing] = useState(false)
 
   useEffect(() => {
     setTimeout(() => {
@@ -278,6 +282,29 @@ export default function PostDetailPage() {
     await createCommentMutation.mutate({ body, parentId })
   }
 
+  const handleRemixClick = async () => {
+    if (!postIdString) return
+    setIsRemixing(true)
+    try {
+      toast.info('Fetching post info for remix...')
+      const cloneInfo = await getPostCloneInfo(postIdString)
+      console.log('Clone Info:', cloneInfo) // Log for debugging
+
+      // TODO: Navigate to Jam UI with cloneInfo
+      // Example: Pass data via query params or state management
+      // router.push(`/jam/new?prompt=${encodeURIComponent(cloneInfo.prompt || '')}&model=${cloneInfo.model || 'default'}&parentPostId=${cloneInfo.parentPostId}&rootPostId=${cloneInfo.rootPostId}&generation=${cloneInfo.generation}`);
+      router.push('/jam/remix-placeholder') // Placeholder navigation
+      toast.success('Starting remix session!')
+    } catch (error: unknown) {
+      console.error('Failed to get post info for remixing:', error)
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error'
+      toast.error(`Failed to start remix: ${errorMessage}`)
+    } finally {
+      setIsRemixing(false)
+    }
+  }
+
   if (!postIdString) {
     return (
       <div className="container mx-auto max-w-3xl p-4">
@@ -445,8 +472,14 @@ export default function PostDetailPage() {
           variant="ghost"
           size="sm"
           className="hidden sm:flex items-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          onClick={handleRemixClick}
+          disabled={isRemixing || !post || post.visibility !== 'public'}
         >
-          <Repeat className="mr-1.5 h-4 w-4" />
+          {isRemixing ? (
+            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+          ) : (
+            <Repeat className="mr-1.5 h-4 w-4" />
+          )}
           Remix
         </Button>
         <Button

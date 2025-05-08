@@ -11,6 +11,8 @@ export const users = pgTable('users', {
   username: text('username').notNull().unique(),
   bio: text('bio'),
   vibe_energy: integer('vibe_energy').notNull().default(50),
+  followerCount: integer('follower_count').notNull().default(0),
+  followingCount: integer('following_count').notNull().default(0),
 
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
