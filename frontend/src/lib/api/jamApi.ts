@@ -53,16 +53,22 @@ export const generateImageForJam = async (
 ): Promise<GenerateImageResponse> => {
   return apiClient<GenerateImageResponse>(`/jams/${jamId}/generate`, {
     method: 'POST',
-    body: payload, // apiClient handles JSON.stringify for non-FormData
+    body: payload as unknown as Record<string, unknown>, // apiClient handles JSON.stringify for non-FormData
   })
   // Error handling and structured error creation are now managed by apiClient
 }
 
 // TODO: Add functions for creating jams, etc.
 // Example for creating a jam (assuming it returns { jamId: number }):
-// export interface CreateJamResponse {
-//   jamId: number;
-// }
-// export const createJam = async (): Promise<CreateJamResponse> => {
-//   return apiClient<CreateJamResponse>('/jams', { method: 'POST' });
-// };
+export interface CreateJamResponse {
+  jamId: number
+  // Any other initial data from the backend, e.g., createdAt for the jam
+  // createdAt: string;
+}
+
+/**
+ * Creates a new Jam session.
+ */
+export const createJam = async (): Promise<CreateJamResponse> => {
+  return apiClient<CreateJamResponse>('/jams', { method: 'POST' })
+}

@@ -1,11 +1,18 @@
 import { zValidator } from '@hono/zod-validator'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { db } from '../db'
 import { users } from '../db/auth-schema'
-import { follows, posts } from '../db/schema' // Assuming follows schema is in schema.ts // IMPORT posts
+import {
+  follows,
+  likes,
+  notifications,
+  posts,
+  veTxns,
+  visibilityEnum,
+} from '../db/schema' // IMPORT posts and visibilityEnum
 import {
   type AuthenticatedContextEnv,
   requireAuthMiddleware,
@@ -48,6 +55,31 @@ const paginationQuerySchema = z.object({
     .refine((val) => val >= 0, {
       message: 'Offset must be a non-negative number',
     }),
+})
+
+// Schema for updating user profile
+const updateUserProfileSchema = z.object({
+  name: z.string().min(1, 'Name cannot be empty.').optional().nullable(),
+  bio: z
+    .string()
+    .max(500, 'Bio cannot exceed 500 characters.')
+    .optional()
+    .nullable(),
+  image: z.string().url('Invalid image URL format.').optional().nullable(), // Avatar URL
+  bannerUrl: z.string().url('Invalid banner URL format.').optional().nullable(),
+})
+
+// Zod schema for notificationId param
+const notificationIdParamSchema = z.object({
+  notificationId: z
+    .string()
+    .regex(/^\d+$/, 'Notification ID must be a positive integer.')
+    .transform(Number),
+})
+
+// Schema for visibility query parameter
+const visibilityQuerySchema = z.object({
+  visibility: z.enum(visibilityEnum.enumValues).optional(),
 })
 
 // POST /api/users/:targetUserId/follow
@@ -115,7 +147,14 @@ userRoutes.post(
           .set({ followerCount: sql`${users.followerCount} + 1` })
           .where(eq(users.id, targetUserId))
 
-        // TODO: Optionally create a notification
+        // Create notification for the followed user
+        await tx.insert(notifications).values({
+          recipientId: targetUserId,
+          actorId: followerId,
+          type: 'follow',
+          isRead: false,
+          // postId and commentId are null for follow notifications
+        })
       })
 
       return c.json(
@@ -250,7 +289,7 @@ userRoutes.get(
   async (c) => {
     const { profileUserId } = c.req.valid('param')
     const { limit, offset } = c.req.valid('query')
-    // const requestingUser = c.get('user') // For future use (e.g., isFollowing)
+    const requestingUser = c.get('user') // Get optional authenticated user
 
     try {
       // 1. Fetch user details
@@ -265,7 +304,8 @@ userRoutes.get(
           followerCount: true,
           followingCount: true,
           createdAt: true,
-          // Exclude sensitive fields like email, vibe_energy unless explicitly needed for profile
+          vibe_energy: true, // Include for potential future use, even if not shown publicly
+          // Exclude sensitive fields like email
         },
       })
 
@@ -273,7 +313,20 @@ userRoutes.get(
         throw new HTTPException(404, { message: 'User profile not found' })
       }
 
-      // 2. Fetch user's public posts (paginated)
+      // 2. Check follow status if a user is logged in and viewing someone else's profile
+      let isFollowing = false
+      if (requestingUser && requestingUser.id !== userProfile.id) {
+        const followCheck = await db.query.follows.findFirst({
+          where: and(
+            eq(follows.followerId, requestingUser.id),
+            eq(follows.followingId, userProfile.id),
+          ),
+          columns: { followerId: true }, // Only need to check existence
+        })
+        isFollowing = !!followCheck
+      }
+
+      // 3. Fetch user's public posts (paginated)
       const userPosts = await db.query.posts.findMany({
         where: and(
           eq(posts.authorId, profileUserId),
@@ -304,8 +357,22 @@ userRoutes.get(
       // the next offset would be currentOffset + limit.
       // If using cursor-based pagination, endCursor would be the ID or timestamp of the last item.
 
+      // Map DB result to expected response structure, including isFollowing
+      const userForResponse = {
+        id: userProfile.id,
+        username: userProfile.username,
+        name: userProfile.name,
+        image: userProfile.image,
+        bio: userProfile.bio,
+        // Don't include vibeEnergy or email in public profiles generally
+        followerCount: userProfile.followerCount,
+        followingCount: userProfile.followingCount,
+        createdAt: userProfile.createdAt,
+        isFollowing: isFollowing, // Add the follow status
+      }
+
       return c.json({
-        user: userProfile,
+        user: userForResponse,
         posts: {
           items: userPosts,
           pageInfo: {
@@ -352,6 +419,7 @@ userRoutes.get(
   async (c) => {
     const { username } = c.req.valid('param')
     const { limit, offset } = c.req.valid('query')
+    const requestingUser = c.get('user') // Get optional authenticated user
 
     try {
       // 1. Fetch user by username to get their ID and profile details
@@ -366,6 +434,7 @@ userRoutes.get(
           followerCount: true,
           followingCount: true,
           createdAt: true,
+          vibe_energy: true, // Include for potential future use
         },
       })
 
@@ -373,12 +442,23 @@ userRoutes.get(
         throw new HTTPException(404, { message: 'User profile not found' })
       }
 
-      const profileUserId = userProfile.id
+      // 2. Check follow status if a user is logged in and viewing someone else's profile
+      let isFollowing = false
+      if (requestingUser && requestingUser.id !== userProfile.id) {
+        const followCheck = await db.query.follows.findFirst({
+          where: and(
+            eq(follows.followerId, requestingUser.id),
+            eq(follows.followingId, userProfile.id),
+          ),
+          columns: { followerId: true }, // Only need to check existence
+        })
+        isFollowing = !!followCheck
+      }
 
-      // 2. Fetch user's public posts (paginated)
+      // 3. Fetch user's public posts (paginated)
       const userPosts = await db.query.posts.findMany({
         where: and(
-          eq(posts.authorId, profileUserId),
+          eq(posts.authorId, userProfile.id),
           eq(posts.visibility, 'public'),
         ),
         columns: {
@@ -398,8 +478,22 @@ userRoutes.get(
 
       const hasNextPage = userPosts.length === limit
 
+      // Map DB result to expected response structure, including isFollowing
+      const userForResponse = {
+        id: userProfile.id,
+        username: userProfile.username,
+        name: userProfile.name,
+        image: userProfile.image,
+        bio: userProfile.bio,
+        // Don't include vibeEnergy or email in public profiles generally
+        followerCount: userProfile.followerCount,
+        followingCount: userProfile.followingCount,
+        createdAt: userProfile.createdAt,
+        isFollowing: isFollowing, // Add the follow status
+      }
+
       return c.json({
-        user: userProfile, // userProfile already contains all necessary user fields
+        user: userForResponse,
         posts: {
           items: userPosts,
           pageInfo: {
@@ -419,6 +513,594 @@ userRoutes.get(
         message: 'Failed to fetch user profile by username',
         cause: errorMessage,
       })
+    }
+  },
+)
+
+// PATCH /api/users/me/profile - Update current authenticated user's profile
+userRoutes.patch(
+  '/me/profile',
+  requireAuthMiddleware,
+  zValidator('json', updateUserProfileSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid profile data format',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      // This should be caught by requireAuthMiddleware, but as a safeguard:
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+    const updatePayload = c.req.valid('json')
+
+    const updateData: Record<string, string | null> = {}
+    // Filter out undefined values, and allow null to be passed for clearing fields.
+    if (updatePayload.name !== undefined) updateData.name = updatePayload.name
+    if (updatePayload.bio !== undefined) updateData.bio = updatePayload.bio
+    if (updatePayload.image !== undefined)
+      updateData.image = updatePayload.image
+    if (updatePayload.bannerUrl !== undefined)
+      updateData.banner_url = updatePayload.bannerUrl // Uncommented and use banner_url for DB
+
+    if (Object.keys(updateData).length === 0) {
+      // Simplified condition as bannerUrl is now part of updateData if provided
+      // Return current profile if no actual data is sent for update, or a 304 Not Modified, or 400.
+      // For simplicity, let's return 400 as it implies client error.
+      throw new HTTPException(400, { message: 'No update data provided.' })
+    }
+
+    try {
+      const updatedUsers = await db
+        .update(users)
+        .set(updateData) // Drizzle should handle Partial correctly
+        .where(eq(users.id, user.id))
+        .returning({
+          id: users.id,
+          username: users.username,
+          name: users.name,
+          email: users.email,
+          image: users.image,
+          bio: users.bio,
+          bannerUrl: users.bannerUrl, // Uncommented and ensure it uses the schema name
+          vibeEnergy: users.vibe_energy,
+          followerCount: users.followerCount,
+          followingCount: users.followingCount,
+          createdAt: users.createdAt,
+        })
+
+      if (!updatedUsers || updatedUsers.length === 0) {
+        // This case should ideally not happen if the user is authenticated and exists.
+        throw new HTTPException(404, {
+          message: 'User not found, cannot update.',
+        })
+      }
+      // The user object from better-auth might not have all these fields.
+      // We return the updated profile from the DB.
+      return c.json(updatedUsers[0])
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(`Error updating profile for user ${user.id}:`, error)
+      // Check for specific DB errors if needed, e.g., unique constraint violation on username if it were updatable here.
+      throw new HTTPException(500, { message: 'Failed to update user profile' })
+    }
+  },
+)
+
+// GET /api/users/me/profile - Fetch current authenticated user's profile AND their posts
+userRoutes.get(
+  '/me/profile',
+  requireAuthMiddleware,
+  zValidator('query', paginationQuerySchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid pagination parameters',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    const { limit, offset } = c.req.valid('query')
+
+    if (!user || !user.id) {
+      throw new HTTPException(500, {
+        message: 'User context not found after auth.',
+      })
+    }
+
+    try {
+      // 1. Fetch user details
+      const userProfileFromDb = await db.query.users.findFirst({
+        where: eq(users.id, user.id),
+        columns: {
+          id: true,
+          username: true,
+          name: true,
+          email: true,
+          image: true,
+          bio: true,
+          bannerUrl: true, // Corrected: should be true to select the column
+          vibe_energy: true,
+          followerCount: true,
+          followingCount: true,
+          createdAt: true,
+        },
+      })
+
+      if (!userProfileFromDb) {
+        throw new HTTPException(404, {
+          message: 'Authenticated user profile not found.',
+        })
+      }
+
+      // Map to the UserProfile structure (frontend expects camelCase vibeEnergy)
+      const userForResponse = {
+        id: userProfileFromDb.id,
+        username: userProfileFromDb.username,
+        name: userProfileFromDb.name,
+        email: userProfileFromDb.email,
+        image: userProfileFromDb.image,
+        bio: userProfileFromDb.bio,
+        bannerUrl: userProfileFromDb.bannerUrl, // Add bannerUrl mapping
+        vibeEnergy: userProfileFromDb.vibe_energy, // Map to camelCase
+        followerCount: userProfileFromDb.followerCount,
+        followingCount: userProfileFromDb.followingCount,
+        createdAt: userProfileFromDb.createdAt,
+      }
+
+      // 2. Fetch user's posts (paginated)
+      const userPosts = await db.query.posts.findMany({
+        where: eq(posts.authorId, user.id), // No visibility filter for own posts, or filter as desired
+        columns: {
+          id: true,
+          title: true,
+          coverImg: true,
+          likeCount: true,
+          commentCount: true,
+          viewCount: true,
+          remixCount: true,
+          createdAt: true,
+          visibility: true, // Good to have for own posts view
+        },
+        orderBy: (postsTable, { desc }) => [desc(postsTable.createdAt)],
+        limit: limit,
+        offset: offset,
+      })
+
+      const hasNextPage = userPosts.length === limit
+
+      return c.json({
+        user: userForResponse, // Use the explicitly mapped user object
+        posts: {
+          items: userPosts,
+          pageInfo: {
+            hasNextPage,
+            nextOffset: hasNextPage ? offset + limit : null,
+          },
+        },
+      })
+    } catch (error) {
+      if (error instanceof HTTPException) {
+        throw error
+      }
+      console.error(`Error fetching profile data for user ${user.id}:`, error)
+      throw new HTTPException(500, {
+        message: 'Failed to fetch user profile data',
+      })
+    }
+  },
+)
+
+// GET /api/users/me/notifications - Fetch notifications for the current user (paginated)
+userRoutes.get(
+  '/me/notifications',
+  requireAuthMiddleware,
+  zValidator('query', paginationQuerySchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid pagination parameters',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      throw new HTTPException(500, {
+        message: 'User context not found after auth.',
+      })
+    }
+    const userId = user.id
+    const { limit, offset } = c.req.valid('query')
+
+    try {
+      const notificationsQuery = db.query.notifications.findMany({
+        where: eq(notifications.recipientId, userId),
+        orderBy: (notificationsTable, { desc }) => [
+          desc(notificationsTable.createdAt),
+        ],
+        limit: limit,
+        offset: offset,
+        with: {
+          actor: {
+            // Select specific fields from the user who acted
+            columns: { id: true, username: true, name: true, image: true },
+          },
+          post: {
+            // Select specific fields from the related post
+            columns: { id: true, title: true, coverImg: true }, // Add coverImg
+          },
+          // Comment details are usually less important for the notification list itself,
+          // but could be fetched if needed (e.g., comment snippet).
+          // comment: {
+          //   columns: { id: true, body: true }
+          // }
+        },
+      })
+
+      const userNotifications = await notificationsQuery
+
+      // Simple pagination check
+      const hasNextPage = userNotifications.length === limit
+
+      return c.json({
+        items: userNotifications,
+        pageInfo: {
+          hasNextPage,
+          nextOffset: hasNextPage ? offset + limit : null,
+        },
+      })
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(`Error fetching notifications for user ${userId}:`, error)
+      throw new HTTPException(500, {
+        message: 'Failed to fetch notifications',
+      })
+    }
+  },
+)
+
+// PATCH /api/users/me/notifications/:notificationId/read - Mark a notification as read
+userRoutes.patch(
+  '/me/notifications/:notificationId/read',
+  requireAuthMiddleware,
+  zValidator('param', notificationIdParamSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid Notification ID format',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+    const userId = user.id
+    const { notificationId } = c.req.valid('param')
+
+    try {
+      // Find the notification and verify ownership
+      const notification = await db.query.notifications.findFirst({
+        where: and(
+          eq(notifications.id, notificationId),
+          eq(notifications.recipientId, userId),
+        ),
+        columns: { id: true, isRead: true },
+      })
+
+      if (!notification) {
+        // Return 404 even if notification exists but belongs to another user for security
+        throw new HTTPException(404, { message: 'Notification not found' })
+      }
+
+      // Only update if it's not already read
+      if (!notification.isRead) {
+        await db
+          .update(notifications)
+          .set({ isRead: true })
+          .where(eq(notifications.id, notificationId))
+      }
+
+      return c.json(
+        { success: true, message: 'Notification marked as read' },
+        200,
+      )
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(
+        `Error marking notification ${notificationId} as read for user ${userId}:`,
+        error,
+      )
+      throw new HTTPException(500, {
+        message: 'Failed to mark notification as read',
+      })
+    }
+  },
+)
+
+// PATCH /api/users/me/notifications/read-all - Mark all unread notifications as read
+userRoutes.patch(
+  '/me/notifications/read-all',
+  requireAuthMiddleware,
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+    const userId = user.id
+
+    try {
+      const result = await db
+        .update(notifications)
+        .set({ isRead: true })
+        .where(
+          and(
+            eq(notifications.recipientId, userId),
+            eq(notifications.isRead, false),
+          ),
+        )
+        .returning({ id: notifications.id }) // Returning IDs might be useful for debugging or counts
+
+      const updatedCount = result.length
+
+      return c.json(
+        {
+          success: true,
+          message: `${updatedCount} notification(s) marked as read.`,
+          updatedCount: updatedCount,
+        },
+        200,
+      )
+    } catch (error) {
+      console.error(
+        `Error marking all notifications as read for user ${userId}:`,
+        error,
+      )
+      throw new HTTPException(500, {
+        message: 'Failed to mark all notifications as read',
+      })
+    }
+  },
+)
+
+// GET /api/users/me/liked-posts - Fetch posts liked by the current user (paginated)
+userRoutes.get(
+  '/me/liked-posts',
+  requireAuthMiddleware,
+  zValidator('query', paginationQuerySchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid pagination parameters',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      throw new HTTPException(500, {
+        message: 'User context not found after auth.',
+      })
+    }
+    const userId = user.id
+    const { limit, offset } = c.req.valid('query')
+
+    try {
+      // Find like records for the user, ordered by when they liked the post
+      const likedPostsQuery = db
+        .select({
+          // Select desired fields from the posts table
+          id: posts.id,
+          title: posts.title,
+          coverImg: posts.coverImg,
+          likeCount: posts.likeCount,
+          commentCount: posts.commentCount,
+          viewCount: posts.viewCount,
+          remixCount: posts.remixCount,
+          createdAt: posts.createdAt,
+          // TODO: Add author info if needed for display card?
+          // authorId: posts.authorId,
+        })
+        .from(likes)
+        .innerJoin(posts, eq(likes.postId, posts.id))
+        .where(eq(likes.userId, userId))
+        .orderBy(sql`${likes.createdAt} DESC`)
+        .limit(limit)
+        .offset(offset)
+
+      const likedPosts = await likedPostsQuery
+
+      // Check if there's a next page
+      // This simple check is based on limit, could be more accurate with a count
+      const hasNextPage = likedPosts.length === limit
+
+      return c.json({
+        items: likedPosts,
+        pageInfo: {
+          hasNextPage,
+          nextOffset: hasNextPage ? offset + limit : null,
+        },
+      })
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(`Error fetching liked posts for user ${userId}:`, error)
+      throw new HTTPException(500, {
+        message: 'Failed to fetch liked posts',
+      })
+    }
+  },
+)
+
+// NOTE: VE routes could be in a separate veRoutes.ts file and mounted on /api/ve
+// For now, adding daily check-in here for consolidation during initial implementation.
+
+// Zod schema for VE transaction reasons (example, adjust as needed)
+// This might live in a shared types/schema location if used elsewhere.
+const VeTransactionReasonEnum = z.enum([
+  'signup_bonus',
+  'daily_login_bonus',
+  'image_generation_cost',
+  'image_generation_refund',
+  'post_publish_bonus',
+  'post_remixed_bonus',
+])
+
+// POST /api/users/ve/daily-check-in - Claim daily VE bonus
+// (Mounted under /api/users as per current file structure, could be /api/ve/daily-check-in)
+userRoutes.post(
+  '/ve/daily-check-in', // Path relative to where userRoutes is mounted (e.g. /api/users/ve/daily-check-in)
+  requireAuthMiddleware,
+  async (c) => {
+    const userSession = c.get('user')
+    if (!userSession || !userSession.id) {
+      throw new HTTPException(401, { message: 'Authentication required.' })
+    }
+    const userId = userSession.id
+
+    try {
+      const todayUTCStart = new Date()
+      todayUTCStart.setUTCHours(0, 0, 0, 0)
+
+      const currentUserState = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: {
+          vibe_energy: true,
+          last_daily_bonus_claimed_at: true,
+        },
+      })
+
+      if (!currentUserState) {
+        throw new HTTPException(404, { message: 'User not found.' })
+      }
+
+      let alreadyClaimedToday = false
+      if (currentUserState.last_daily_bonus_claimed_at) {
+        const lastClaimDate = new Date(
+          currentUserState.last_daily_bonus_claimed_at,
+        )
+        if (lastClaimDate >= todayUTCStart) {
+          alreadyClaimedToday = true
+        }
+      }
+
+      if (alreadyClaimedToday) {
+        return c.json({
+          success: true,
+          message: 'Daily bonus already claimed for today.',
+          newVeBalance: currentUserState.vibe_energy,
+          claimedToday: true,
+          alreadyClaimed: true,
+        })
+      }
+
+      // Award bonus
+      const dailyBonusAmount = 10
+      const newVeBalance =
+        (currentUserState.vibe_energy || 0) + dailyBonusAmount
+
+      await db.transaction(async (tx) => {
+        // Update user's VE and last claimed timestamp
+        await tx
+          .update(users)
+          .set({
+            vibe_energy: newVeBalance,
+            last_daily_bonus_claimed_at: new Date(),
+          })
+          .where(eq(users.id, userId))
+
+        // Insert into veTxns table using actual schema
+        await tx.insert(veTxns).values({
+          userId: userId,
+          delta: dailyBonusAmount,
+          reason: VeTransactionReasonEnum.Enum.daily_login_bonus,
+          refId: null, // refId is null for daily bonus
+        })
+        // console.log(`TODO: Record +${dailyBonusAmount} VE txn for user ${userId} for daily bonus.`) // Remove placeholder log
+      })
+
+      return c.json({
+        success: true,
+        message: 'Daily bonus claimed successfully!',
+        newVeBalance: newVeBalance,
+        claimedToday: true,
+        alreadyClaimed: false,
+      })
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(`Error claiming daily bonus for user ${userId}:`, error)
+      throw new HTTPException(500, { message: 'Failed to claim daily bonus' })
+    }
+  },
+)
+
+// GET /api/users/me/posts - Fetches posts for the authenticated user (for gallery)
+userRoutes.get(
+  '/me/posts',
+  requireAuthMiddleware,
+  zValidator(
+    'query',
+    paginationQuerySchema.merge(visibilityQuerySchema),
+    (result, c) => {
+      if (!result.success) {
+        return c.json(
+          { error: 'Validation failed', details: result.error.flatten() },
+          400,
+        )
+      }
+    },
+  ),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      throw new HTTPException(401, { message: 'User not authenticated' })
+    }
+    const userId = user.id
+    const { limit, offset, visibility } = c.req.valid('query')
+
+    try {
+      const conditions = [eq(posts.authorId, userId)]
+      if (visibility) {
+        conditions.push(eq(posts.visibility, visibility))
+      }
+
+      const userPosts = await db.query.posts.findMany({
+        where: and(...conditions),
+        columns: {
+          id: true,
+          title: true,
+          coverImg: true,
+          likeCount: true,
+          commentCount: true,
+          viewCount: true,
+          remixCount: true,
+          createdAt: true,
+          // No need for authorId, bodyMd, etc. for gallery card view
+        },
+        orderBy: [desc(posts.createdAt)],
+        limit: limit + 1, // Fetch one extra to check for hasNextPage
+        offset: offset,
+      })
+
+      const hasNextPage = userPosts.length > limit
+      const itemsToReturn = hasNextPage ? userPosts.slice(0, limit) : userPosts
+      const nextOffset = hasNextPage ? offset + limit : null
+
+      return c.json({
+        items: itemsToReturn,
+        pageInfo: {
+          hasNextPage,
+          nextOffset,
+        },
+      })
+    } catch (error) {
+      console.error(`Error fetching posts for user ${userId}:`, error)
+      throw new HTTPException(500, { message: 'Failed to fetch user posts' })
     }
   },
 )

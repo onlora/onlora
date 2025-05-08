@@ -10,9 +10,13 @@ export const users = pgTable('users', {
   // Application-specific fields
   username: text('username').notNull().unique(),
   bio: text('bio'),
+  bannerUrl: text('banner_url'),
   vibe_energy: integer('vibe_energy').notNull().default(50),
   followerCount: integer('follower_count').notNull().default(0),
   followingCount: integer('following_count').notNull().default(0),
+  last_daily_bonus_claimed_at: timestamp('last_daily_bonus_claimed_at', {
+    withTimezone: true,
+  }),
 
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()

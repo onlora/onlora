@@ -7,6 +7,7 @@ export interface CommentAuthor {
   id: string
   name: string | null
   image: string | null // Avatar URL
+  username: string | null // Added username
 }
 
 // Matches the comment structure returned by the backend

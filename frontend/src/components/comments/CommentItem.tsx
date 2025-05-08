@@ -1,49 +1,109 @@
+'use client'
+
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import type { CommentWithAuthor } from '@/lib/api/commentApi' // Assuming this path is correct
+import { Button } from '@/components/ui/button'
+import type { CommentWithAuthor } from '@/lib/api/commentApi'
+import { getInitials } from '@/lib/utils'
 import { formatDistanceToNowStrict } from 'date-fns'
-import type React from 'react'
+import { CornerDownRight } from 'lucide-react' // Icon for reply button
+import Link from 'next/link'
 
 interface CommentItemProps {
   comment: CommentWithAuthor
+  allCommentsById: Record<number, CommentWithAuthor> // Map of all comments
+  nestingLevel: number // Current depth
+  currentUserId?: string | null // ID of the logged-in user
+  onReply: (commentId: number, authorName: string) => void // Reply handler
 }
 
-const CommentItem: React.FC<CommentItemProps> = ({ comment }) => {
-  const { author, body, createdAt } = comment
+export default function CommentItem({
+  comment,
+  allCommentsById,
+  nestingLevel,
+  currentUserId,
+  onReply,
+}: CommentItemProps) {
+  const author = comment.author
+  const timeAgo = comment.createdAt
+    ? formatDistanceToNowStrict(new Date(comment.createdAt), {
+        addSuffix: true,
+      })
+    : ''
 
-  const timeAgo = createdAt
-    ? formatDistanceToNowStrict(new Date(createdAt), { addSuffix: true })
-    : 'just now'
+  // Find direct children of this comment
+  const childComments = Object.values(allCommentsById)
+    .filter((c) => c.parentId === comment.id)
+    .sort(
+      (a, b) =>
+        new Date(a.createdAt || 0).getTime() -
+        new Date(b.createdAt || 0).getTime(),
+    ) // Sort children by date
+
+  const handleReplyClick = () => {
+    onReply(comment.id, author?.name || author?.username || 'User')
+  }
+
+  const canReply = !!currentUserId // User must be logged in to reply
 
   return (
-    <div className="flex items-start space-x-3 py-4">
-      <Avatar className="h-8 w-8">
-        <AvatarImage
-          src={author?.image ?? undefined}
-          alt={author?.name ?? 'User'}
-        />
-        <AvatarFallback>
-          {author?.name?.[0]?.toUpperCase() ?? 'U'}
-        </AvatarFallback>
-      </Avatar>
-      <div className="flex-1">
-        <div className="flex items-center space-x-2">
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            {author?.name ?? 'Anonymous'}
+    <div
+      className={`py-4 ${nestingLevel > 0 ? `ml-${nestingLevel * 4} pl-4 border-l border-dashed border-gray-200 dark:border-gray-700` : ''}`}
+    >
+      <div className="flex space-x-3">
+        <Avatar className="h-8 w-8 flex-shrink-0">
+          <AvatarImage src={author?.image ?? undefined} />
+          <AvatarFallback>
+            {getInitials(author?.name || author?.username)}
+          </AvatarFallback>
+        </Avatar>
+        <div className="flex-1 space-y-1">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold">
+              {author ? (
+                <Link
+                  href={`/u/${author.username}`}
+                  className="hover:underline"
+                >
+                  {author.name || author.username}
+                </Link>
+              ) : (
+                'Anonymous'
+              )}
+            </h4>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {timeAgo}
+            </p>
+          </div>
+          <p className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
+            {comment.body}
           </p>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{timeAgo}</p>
+          {canReply && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleReplyClick}
+              className="text-xs h-6 px-1.5"
+            >
+              <CornerDownRight className="h-3 w-3 mr-1" /> Reply
+            </Button>
+          )}
         </div>
-        <p className="mt-1 text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-          {body}
-        </p>
-        {/* Placeholder for reply button or other actions */}
-        {/* <div className="mt-2">
-          <button className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300">
-            Reply
-          </button>
-        </div> */}
       </div>
+      {/* Recursively render children */}
+      {childComments.length > 0 && (
+        <div className="mt-4 space-y-0">
+          {childComments.map((child) => (
+            <CommentItem
+              key={child.id}
+              comment={child}
+              allCommentsById={allCommentsById}
+              nestingLevel={nestingLevel + 1}
+              currentUserId={currentUserId}
+              onReply={onReply}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
-
-export default CommentItem

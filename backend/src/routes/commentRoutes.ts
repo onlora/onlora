@@ -4,7 +4,7 @@ import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { db } from '../db'
-import { comments, posts } from '../db/schema'
+import { comments, notifications, posts } from '../db/schema'
 import {
   type AuthenticatedContextEnv,
   requireAuthMiddleware,
@@ -74,14 +74,15 @@ commentRoutes.post(
           }
         }
 
-        // 2. Check if post exists (important before incrementing count)
-        const postExists = await tx.query.posts.findFirst({
+        // 2. Check if post exists and get author ID
+        const post = await tx.query.posts.findFirst({
           where: eq(posts.id, payload.postId),
-          columns: { id: true },
+          columns: { id: true, authorId: true }, // Get authorId
         })
-        if (!postExists) {
+        if (!post) {
           throw new HTTPException(404, { message: 'Post not found' })
         }
+        const postAuthorId = post.authorId
 
         // 3. Insert the new comment
         const [newComment] = await tx
@@ -104,7 +105,47 @@ commentRoutes.post(
           .set({ commentCount: sql`${posts.commentCount} + 1` })
           .where(eq(posts.id, payload.postId))
 
-        // 5. Fetch author details for the response (optional, but good UX)
+        // 5. Insert Notifications
+        let parentCommentAuthorId: string | null | undefined = null
+
+        // 5a. Handle 'reply' notification if parentId exists
+        if (payload.parentId) {
+          const parentComment = await tx.query.comments.findFirst({
+            where: eq(comments.id, payload.parentId),
+            columns: { userId: true }, // Get parent comment author
+          })
+          parentCommentAuthorId = parentComment?.userId
+          // Notify parent comment author if they are not the one replying
+          if (parentCommentAuthorId && parentCommentAuthorId !== userId) {
+            await tx.insert(notifications).values({
+              recipientId: parentCommentAuthorId,
+              actorId: userId,
+              type: 'reply',
+              postId: payload.postId,
+              commentId: newComment.id, // Link to the new reply comment
+              isRead: false,
+            })
+          }
+        }
+
+        // 5b. Handle 'comment' notification for post author
+        // Notify post author if they aren't the commenter and aren't the parent author (to avoid double notification on self-reply)
+        if (
+          postAuthorId &&
+          postAuthorId !== userId &&
+          postAuthorId !== parentCommentAuthorId
+        ) {
+          await tx.insert(notifications).values({
+            recipientId: postAuthorId,
+            actorId: userId,
+            type: 'comment',
+            postId: payload.postId,
+            commentId: newComment.id, // Link to the new comment
+            isRead: false,
+          })
+        }
+
+        // 6. Fetch author details for the response (optional, but good UX)
         // Note: `user` from context might not have all details like avatar
         // Fetch fresh user data if needed, or just use context data.
         const commentAuthor = {

@@ -261,24 +261,26 @@ export const follows = pgTable(
 
 export const notifications = pgTable('notifications', {
   id: bigserial('id', { mode: 'number' }).primaryKey(),
-  recipientUserId: text('recipient_user_id')
+  recipientId: text('recipient_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  actorUserId: text('actor_user_id').references(() => users.id, {
-    onDelete: 'set null',
-  }),
-  type: notificationTypeEnum('type').notNull(),
-  postId: bigint('post_id', { mode: 'number' }).references(() => posts.id, {
+  actorId: text('actor_id').references(() => users.id, {
     onDelete: 'cascade',
-  }),
+  }), // User who triggered the notification (e.g., liker, commenter, follower)
+  type: notificationTypeEnum('type').notNull(),
+  postId: integer('post_id').references(() => posts.id, {
+    onDelete: 'cascade',
+  }), // Nullable, relevant for like, comment, reply, remix
   commentId: bigint('comment_id', { mode: 'number' }).references(
     () => comments.id,
-    { onDelete: 'cascade' },
-  ),
-  isRead: boolean('is_read').default(false).notNull(),
+    {
+      onDelete: 'cascade',
+    },
+  ), // Nullable, relevant for reply
+  isRead: boolean('is_read').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true })
-    .defaultNow()
-    .notNull(),
+    .notNull()
+    .defaultNow(),
 })
 
 export const followsRelations = relations(follows, ({ one }) => ({
@@ -296,24 +298,22 @@ export const followsRelations = relations(follows, ({ one }) => ({
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({
   recipient: one(users, {
-    fields: [notifications.recipientUserId],
+    fields: [notifications.recipientId],
     references: [users.id],
-    relationName: 'notificationsForUser',
+    relationName: 'notificationRecipient',
   }),
   actor: one(users, {
-    fields: [notifications.actorUserId],
+    fields: [notifications.actorId],
     references: [users.id],
-    relationName: 'notificationsByActor',
+    relationName: 'notificationActor',
   }),
   post: one(posts, {
     fields: [notifications.postId],
     references: [posts.id],
-    relationName: 'notificationsForPost',
   }),
   comment: one(comments, {
     fields: [notifications.commentId],
     references: [comments.id],
-    relationName: 'notificationsForComment',
   }),
 }))
 

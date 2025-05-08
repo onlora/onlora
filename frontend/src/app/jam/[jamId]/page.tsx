@@ -1,28 +1,31 @@
 'use client' // Need client component for state and hooks
 
+import ProtectedPage from '@/components/auth/ProtectedPage' // Import the wrapper
 import { ActionBar } from '@/components/jam/ActionBar'
 import { ChatInput } from '@/components/jam/ChatInput' // Import the real component
+import { ImageLightbox } from '@/components/jam/ImageLightbox' // Import ImageLightbox
 import { ImageStrip } from '@/components/jam/ImageStrip' // Import the real component
 import { type ImageSize, JamToolbar } from '@/components/jam/JamToolbar' // Import Toolbar and ImageSize type
 import { MessageList } from '@/components/jam/MessageList' // Import the real component
 import { PublishSheet } from '@/components/jam/PublishSheet'
-import type { PostVisibility } from '@/components/jam/PublishSheet' // Import PostVisibility type
+import { Button } from '@/components/ui/button'
+import { useJamSession } from '@/hooks/useJamSession' // Import useJamSession
+import type { ApiError } from '@/lib/api/apiClient' // Correct import for ApiError
+import type { GenerateImagePayload, MessageImage } from '@/lib/api/jamApi' // Import the API function
+// import type { ApiErrorResponse } from '@/lib/api/apiClient' // No longer needed here if mutation is removed
 import {
-  type ApiErrorResponse,
-  type GenerateImagePayload,
-  type GenerateImageResponse,
-  type Message,
-  type MessageImage,
-  generateImageForJam,
-  getJamMessages,
-} from '@/lib/api/jamApi' // Import the API function
-import { type CreatePostPayload, createPost } from '@/lib/api/postApi' // Import createPost
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query' // Import useMutation, useQueryClient
-import { useEffect, useMemo, useRef, useState } from 'react' // Import useMemo and useRef
+  type CreatePostPayload,
+  type PostCloneInfo, // Import PostCloneInfo type
+  createPost,
+  getPostCloneInfo, // Import getPostCloneInfo
+} from '@/lib/api/postApi' // Import createPost
+import { useMutation, useQueryClient } from '@tanstack/react-query' // useQuery no longer needed here
+import { AlertTriangle, Loader2 } from 'lucide-react' // Import icons
+import { useRouter, useSearchParams } from 'next/navigation' // Import useRouter and useSearchParams
+import { useEffect, useMemo, useState } from 'react' // Import useMemo and useRef
 import { toast } from 'sonner' // Import toast for notifications
 
-// Placeholder components (to be created later)
-// const ChatInput = () => <div className="p-4 border-t">Chat Input Placeholder</div>;
+const CHAT_HISTORY_LENGTH = 15 // Display last 15 messages
 
 interface JamPageProps {
   params: {
@@ -30,50 +33,81 @@ interface JamPageProps {
   }
 }
 
-// Using default export for Next.js pages
 export default function JamPage({ params }: JamPageProps) {
-  const { jamId } = params
+  const { jamId: jamIdFromParams } = params
   const queryClient = useQueryClient() // Get query client instance
-  // State for messages added optimistically by the user
-  const [optimisticMessages, setOptimisticMessages] = useState<Message[]>([])
-  // State to hold the current task ID for SSE connection
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null)
-  // State for generated images displayed in the strip
-  const [generatedImages, setGeneratedImages] = useState<MessageImage[]>([])
-  // State for selected image IDs
+  const router = useRouter()
+  const searchParams = useSearchParams() // Get searchParams
+
+  // State for pre-filled data from a remixed post
+  const [initialPublishData, setInitialPublishData] =
+    useState<PostCloneInfo | null>(null)
+
+  // Selected image IDs for publishing
   const [selectedImageIds, setSelectedImageIds] = useState<Set<number>>(
     new Set(),
   )
-  // State for selected image size
-  const [selectedSize, setSelectedSize] = useState<ImageSize>('512x512') // Default size
+  // Selected image size for generation
+  const [selectedSize, setSelectedSize] = useState<ImageSize>('1024x1024')
   const [isPublishSheetOpen, setIsPublishSheetOpen] = useState(false)
 
-  // Fetch messages using React Query
+  // Lightbox state
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [lightboxImage, setLightboxImage] = useState<MessageImage | null>(null)
+
+  // Use useJamSession for all jam-related state and logic
   const {
-    data: fetchedMessages,
-    isLoading: isLoadingMessages,
-    error: messagesError,
-  } = useQuery<Message[], Error>({
-    // Query key identifies this query uniquely
-    queryKey: ['jamMessages', jamId],
-    // The function that fetches the data
-    queryFn: () => getJamMessages(jamId),
-    // Only run the query if jamId is available
-    enabled: !!jamId,
-    // Optional: Configure staleTime, refetchOnWindowFocus, etc.
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    refetchOnWindowFocus: false, // Don't refetch just on window focus
-  })
+    messages: allMessages, // All messages from the hook
+    isGenerating,
+    generationProgress,
+    generatedImages: jamGeneratedImages, // Use this for ImageStrip and PublishSheet logic
+    submitPrompt,
+    isLoadingMessages,
+    messagesError,
+    resolvedJamId, // Destructure resolvedJamId
+    isInitializing, // Destructure isInitializing
+  } = useJamSession(jamIdFromParams)
 
-  // Combine fetched messages with optimistically added ones for display
+  // Effect to fetch clone info if remixSourcePostId is present on a new jam session
+  useEffect(() => {
+    const remixSourcePostId = searchParams.get('remixSourcePostId')
+
+    if (
+      remixSourcePostId &&
+      jamIdFromParams === 'new' &&
+      !initialPublishData &&
+      !isInitializing
+    ) {
+      // Condition based on jamId from params being 'new'
+      const fetchCloneData = async () => {
+        try {
+          // Do not show toast.info here as useJamSession will show 'New Jam session started!'
+          const data = await getPostCloneInfo(remixSourcePostId)
+          setInitialPublishData(data)
+          // Optionally pre-fill parts of the prompt or trigger a first message based on this data?
+          // For now, just storing for PublishSheet.
+          if (data) toast.success('Original vibe data loaded for remixing.')
+        } catch (error) {
+          console.error('Failed to fetch clone info for remix:', error)
+          toast.error(
+            `Could not load data from original vibe: ${
+              (error as Error).message
+            }`,
+          )
+          // Potentially redirect or clear remixSourcePostId if fetching fails critically
+          // router.replace(`/jam/${jamIdFromParams}`, undefined); // Clear query param example
+        }
+      }
+      fetchCloneData()
+    }
+  }, [jamIdFromParams, searchParams, initialPublishData, isInitializing])
+
+  // Display only the last N messages
   const displayMessages = useMemo(() => {
-    const baseMessages = fetchedMessages || []
-    // Simple append strategy for now. More complex logic could filter
-    // based on IDs if optimistic messages get real IDs later.
-    return [...baseMessages, ...optimisticMessages]
-  }, [fetchedMessages, optimisticMessages])
+    return allMessages.slice(-CHAT_HISTORY_LENGTH)
+  }, [allMessages])
 
-  // TODO: Display a user-friendly error if messagesError exists
+  // Display a user-friendly error if messagesError (from hook) exists
   useEffect(() => {
     if (messagesError) {
       console.error('Error fetching messages:', messagesError.message)
@@ -81,234 +115,22 @@ export default function JamPage({ params }: JamPageProps) {
     }
   }, [messagesError])
 
-  // --- Generate Image Mutation --- //
-  const { mutate: sendGenerationRequest, isPending: isGenerating } =
-    useMutation<GenerateImageResponse, Error, GenerateImagePayload>({
-      mutationFn: (payload) => generateImageForJam(jamId, payload),
-      onSuccess: (data) => {
-        console.log('Generation request successful, taskId:', data.taskId)
-        toast.success('Generation started!')
-        // Update the temporary "Generating..." message with a real task ID marker?
-        // Or just set the task ID to trigger SSE
-        setCurrentTaskId(data.taskId) // Trigger SSE connection
+  // Ref for last optimistic message ID (potentially remove if hook handles all optimistic UI)
+  // const lastTempUserMessageIdRef = useRef<string | number | null>(null) // useJamSession handles this
 
-        // Optionally update the AI message placeholder to indicate waiting for SSE
-        const tempAiId = `temp-ai-${lastTempUserMessageIdRef.current}`
-        setOptimisticMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === tempAiId
-              ? {
-                  ...msg,
-                  text: `Generating... (Task: ${data.taskId.substring(0, 6)}...)`,
-                }
-              : msg,
-          ),
-        )
-      },
-      onError: (error) => {
-        console.error('Error sending generation request:', error)
-        const apiError = error as Error & Partial<ApiErrorResponse>
-        let errorMessage = apiError.message || 'An unknown error occurred.'
-
-        // Customize error message for specific codes (e.g., insufficient VE)
-        if (
-          apiError.code === 402 &&
-          apiError.currentVE !== undefined &&
-          apiError.requiredVE !== undefined
-        ) {
-          errorMessage = `Insufficient VE (Need ${apiError.requiredVE}, Have ${apiError.currentVE}).`
-        }
-        toast.error(`Generation failed: ${errorMessage}`)
-
-        // Remove the optimistic user message and the temporary "Generating..." message
-        setOptimisticMessages((prev) =>
-          prev.filter(
-            (msg) =>
-              msg.id !== lastTempUserMessageIdRef.current &&
-              msg.id !== `temp-ai-${lastTempUserMessageIdRef.current}`,
-          ),
-        )
-        setCurrentTaskId(null) // Clear task ID on error
-      },
-      // We don't need onSettled to setIsSending(false) as isPending handles it
-    })
-
-  // Ref to keep track of the last optimistic user message ID for removal on error/success
-  const lastTempUserMessageIdRef = useRef<string | number | null>(null)
-
-  const handleSendMessage = (prompt: string) => {
-    console.log('handleSendMessage triggered with prompt:', prompt)
-    const tempUserId = `temp-${Date.now()}`
-    lastTempUserMessageIdRef.current = tempUserId // Store temp ID
-
-    const userMessage: Message = {
-      id: tempUserId,
-      jam_id: Number.parseInt(jamId, 10),
-      role: 'user',
-      text: prompt,
-      created_at: new Date().toISOString(),
-      images: null,
+  const handleSubmitPrompt = (promptText: string) => {
+    if (!resolvedJamId || isInitializing) {
+      toast.error('Jam session is not ready yet. Please wait.')
+      return
     }
-    setOptimisticMessages((prev) => [...prev, userMessage])
-
-    // Add the temporary "Generating..." message
-    const tempAiId = `temp-ai-${tempUserId}`
-    const aiProcessingMessage: Message = {
-      id: tempAiId,
-      jam_id: Number.parseInt(jamId, 10),
-      role: 'ai',
-      text: 'Requesting generation...',
-      created_at: new Date().toISOString(),
-      images: null,
-    }
-    setOptimisticMessages((prev) => [...prev, aiProcessingMessage])
-
-    // Prepare payload using selectedSize
     const payload: GenerateImagePayload = {
-      prompt: prompt,
-      modelProvider: 'openai', // Hardcoded
-      modelId: 'dall-e-3', // Hardcoded
-      size: selectedSize, // Use state variable
+      prompt: promptText,
+      modelProvider: 'openai', // Hardcoded for now
+      modelId: 'dall-e-3', // Hardcoded for now
+      size: selectedSize,
     }
-
-    sendGenerationRequest(payload)
+    submitPrompt(payload) // submitPrompt is from useJamSession
   }
-
-  // --- SSE Handling --- //
-  useEffect(() => {
-    if (!currentTaskId) return // No task to listen for
-
-    const eventSourceUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api'}/tasks/${currentTaskId}/events`
-    console.log(`Connecting to SSE: ${eventSourceUrl}`)
-    const eventSource = new EventSource(eventSourceUrl, {
-      withCredentials: true,
-    })
-    let latestAiMessageId: number | null = null // To store ID of final AI message
-
-    eventSource.onopen = () => {
-      console.log(`SSE connection opened for task: ${currentTaskId}`)
-      toast.info('Listening for generation progress...')
-    }
-
-    eventSource.onerror = (error) => {
-      console.error('SSE error:', error)
-      toast.error('Connection error during generation.')
-      eventSource.close() // Close connection on error
-      setCurrentTaskId(null) // Reset task ID
-    }
-
-    // Listener for progress updates
-    eventSource.addEventListener('progress', (event: MessageEvent) => {
-      try {
-        const progressData = JSON.parse(event.data)
-        console.log('SSE progress:', progressData)
-        toast.info(progressData.message || 'Generation progress...')
-        // Update a specific message or show progress in ImageStrip?
-        // For now, just log and toast.
-        // Example: Update the placeholder AI message
-        const tempAiId = `temp-ai-${lastTempUserMessageIdRef.current}`
-        setOptimisticMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === tempAiId
-              ? { ...msg, text: progressData.message || msg.text }
-              : msg,
-          ),
-        )
-      } catch (e) {
-        console.error('Failed to parse SSE progress data:', event.data, e)
-      }
-    })
-
-    // Listener for completion updates
-    eventSource.addEventListener('complete', (event: MessageEvent) => {
-      try {
-        const completionData = JSON.parse(event.data)
-        console.log('SSE complete:', completionData)
-        toast.success(completionData.message || 'Generation complete!')
-
-        // Add the final AI message with image details
-        // Requires mapping completionData fields to Message structure
-        const finalAiMessage: Message = {
-          id: completionData.imageId || `final-ai-${Date.now()}`, // Use actual image ID if available
-          jam_id: Number.parseInt(jamId, 10),
-          role: 'ai',
-          text: completionData.message || 'Generated image:',
-          created_at: new Date().toISOString(),
-          images: completionData.imageUrl
-            ? [
-                {
-                  id: completionData.imageId || 0,
-                  url: completionData.imageUrl,
-                  // r2Key might not be sent via SSE, depends on backend
-                },
-              ]
-            : null,
-        }
-        latestAiMessageId = finalAiMessage.id as number
-
-        // Update generatedImages state
-        // TODO: This assumes SSE sends one image URL in completionData. Adjust if it sends multiple or uses progress events.
-        if (completionData.imageUrl && completionData.imageId) {
-          const newImage: MessageImage = {
-            id: completionData.imageId,
-            url: completionData.imageUrl,
-            // r2Key: completionData.r2Key, // Add if backend sends it
-          }
-          // Add to existing images, or replace if needed by design
-          setGeneratedImages((prev) => [...prev, newImage])
-        }
-
-        // Remove placeholder messages and add the final one
-        setOptimisticMessages((prev) => [
-          ...prev.filter(
-            (msg) =>
-              msg.id !== `temp-ai-${lastTempUserMessageIdRef.current}` &&
-              msg.id !== lastTempUserMessageIdRef.current, // Optionally keep user prompt
-          ),
-          finalAiMessage,
-        ])
-
-        eventSource.close() // Close connection on completion
-        setCurrentTaskId(null) // Reset task ID
-
-        // Invalidate or refetch jam messages query after completion?
-        // queryClient.invalidateQueries({ queryKey: ['jamMessages', jamId] });
-      } catch (e) {
-        console.error('Failed to parse SSE complete data:', event.data, e)
-        eventSource.close()
-        setCurrentTaskId(null)
-      }
-    })
-
-    // Listener for error updates from the task itself
-    eventSource.addEventListener('error', (event: MessageEvent) => {
-      try {
-        const errorData = JSON.parse(event.data)
-        console.error('SSE task error:', errorData)
-        toast.error(errorData.message || 'Generation failed during processing.')
-
-        // Remove placeholder messages
-        setOptimisticMessages((prev) =>
-          prev.filter(
-            (msg) =>
-              msg.id !== `temp-ai-${lastTempUserMessageIdRef.current}` &&
-              msg.id !== lastTempUserMessageIdRef.current, // Optionally keep user prompt
-          ),
-        )
-      } catch (e) {
-        console.error('Failed to parse SSE error data:', event.data, e)
-        toast.error('Generation failed. Could not parse error details.')
-      }
-      eventSource.close() // Close connection on task error
-      setCurrentTaskId(null) // Reset task ID
-    })
-
-    // Cleanup function to close SSE connection when component unmounts or taskId changes
-    return () => {
-      console.log(`SSE connection closing for task: ${currentTaskId}`)
-      eventSource.close()
-    }
-  }, [currentTaskId, jamId]) // Dependencies
 
   // --- Image Selection Handler --- //
   const handleImageSelect = (imageId: number) => {
@@ -323,6 +145,12 @@ export default function JamPage({ params }: JamPageProps) {
     })
   }
 
+  // --- Lightbox Image Activation Handler ---
+  const handleImageActivate = (image: MessageImage) => {
+    setLightboxImage(image)
+    setLightboxOpen(true)
+  }
+
   // --- Size Change Handler --- //
   const handleSizeChange = (newSize: ImageSize) => {
     setSelectedSize(newSize)
@@ -331,8 +159,11 @@ export default function JamPage({ params }: JamPageProps) {
 
   // --- Data for PublishSheet --- //
   const imagesToPublish = useMemo(() => {
-    return generatedImages.filter((img) => selectedImageIds.has(img.id))
-  }, [generatedImages, selectedImageIds])
+    // Use jamGeneratedImages from the hook
+    return jamGeneratedImages.filter((img: MessageImage) =>
+      selectedImageIds.has(img.id),
+    )
+  }, [jamGeneratedImages, selectedImageIds])
 
   // --- PublishSheet Handlers --- //
   const handleOpenPublishSheet = () => {
@@ -344,95 +175,151 @@ export default function JamPage({ params }: JamPageProps) {
   }
 
   // --- Publish Post Mutation --- //
-  const { mutate: submitPost, isPending: isPublishingPost } = useMutation<
-    // Define types for useMutation explicitly
-    import('@/lib/api/postApi').CreatePostResponse, // Success response type
-    Error, // Error type
-    CreatePostPayload // Variables type for the mutation function
+  const { mutate: publishPost, isPending: isPublishingPost } = useMutation<
+    { postId: number },
+    ApiError,
+    Omit<CreatePostPayload, 'imageIds' | 'jamId'>
   >({
-    mutationFn: createPost, // The function that performs the API call
-    onSuccess: (responseData, variables) => {
-      // variables here is the CreatePostPayload
-      toast.success(
-        `Post '${variables.title}' published! ID: ${responseData.postId}`,
-      )
-      setIsPublishSheetOpen(false)
-      setSelectedImageIds(new Set())
-      // TODO: Invalidate relevant queries (e.g., user's posts, feed)
-      // queryClient.invalidateQueries({ queryKey: ['userPosts'] });
-      // TODO: Optionally redirect to the new post or a gallery page
-      // router.push(`/posts/${responseData.postId}`);
+    mutationFn: async (formData) => {
+      if (!resolvedJamId) {
+        toast.error('Jam session ID not available. Cannot publish.')
+        throw new Error('Jam ID not resolved for publishing')
+      }
+      const payload: CreatePostPayload = {
+        ...formData,
+        imageIds: Array.from(selectedImageIds),
+        jamId: Number.parseInt(resolvedJamId, 10), // Use resolvedJamId
+      }
+      // Add remix fields if initialPublishData exists (from a remix operation)
+      if (initialPublishData) {
+        payload.parentPostId = initialPublishData.parentPostId
+        payload.rootPostId = initialPublishData.rootPostId
+        payload.generation = initialPublishData.generation
+      }
+
+      // imagesToPublish is already derived from jamGeneratedImages
+      if (imagesToPublish.length === 0 && payload.imageIds.length > 0) {
+        console.warn(
+          'Selected image IDs not found in current generatedImages state during publish.',
+        )
+      }
+      return createPost(payload)
     },
-    onError: (
-      error: Error & Partial<import('@/lib/api/jamApi').ApiErrorResponse>,
-    ) => {
+    onSuccess: (data) => {
+      toast.success(`Vibe published successfully! Post ID: ${data.postId}`)
+      setIsPublishSheetOpen(false)
+      setSelectedImageIds(new Set()) // Clear selection
+      queryClient.invalidateQueries({ queryKey: ['feed', 'latest'] })
+      if (resolvedJamId) {
+        queryClient.invalidateQueries({
+          queryKey: ['jamMessages', resolvedJamId],
+        }) // Invalidate jam messages
+      }
+      router.push(`/posts/${data.postId}`) // Redirect to post detail page
+    },
+    onError: (error) => {
       console.error('Error publishing post:', error)
-      toast.error(`Failed to publish post: ${error.message || 'Unknown error'}`)
-      // Optionally, do not close the sheet on error to allow retries/corrections
-      // setIsPublishSheetOpen(false);
+      toast.error(`Failed to publish: ${error.message}`)
     },
   })
 
-  const handlePublishSubmit = (data: {
-    title: string
-    description: string
-    tags: string[]
-    visibility: PostVisibility
-  }) => {
-    if (imagesToPublish.length === 0) {
-      toast.error('No images selected for publishing.')
-      return
-    }
-
-    const payload: CreatePostPayload = {
-      title: data.title,
-      description: data.description,
-      tags: data.tags,
-      visibility: data.visibility,
-      imageIds: imagesToPublish.map((img) => img.id),
-      jamId: Number.parseInt(jamId, 10), // Assuming jamId should be included
-    }
-
-    console.log('Submitting post with payload:', payload)
-    submitPost(payload) // Call the mutation
+  if (isInitializing && !resolvedJamId) {
+    return (
+      <ProtectedPage>
+        <div className="flex items-center justify-center h-screen">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+          <p className="ml-3 text-xl text-muted-foreground">
+            Starting your Jam session...
+          </p>
+        </div>
+      </ProtectedPage>
+    )
   }
 
-  return (
-    <div className="flex flex-col h-screen bg-background text-foreground">
-      <JamToolbar selectedSize={selectedSize} onSizeChange={handleSizeChange} />
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Main Chat Area */}
-        <div className="flex flex-col flex-1">
-          {/* TODO: Add loading indicator based on isLoadingMessages */}
-          <MessageList messages={displayMessages} />
-          <ChatInput onSubmit={handleSendMessage} isLoading={isGenerating} />
+  if (!isInitializing && !resolvedJamId) {
+    return (
+      <ProtectedPage>
+        <div className="flex flex-col items-center justify-center h-screen">
+          <AlertTriangle className="h-16 w-16 text-destructive mb-6" />
+          <h2 className="text-2xl font-semibold mb-3">Jam Session Error</h2>
+          <p className="text-lg text-muted-foreground mb-6 text-center max-w-md">
+            We couldn't start or load your Jam session. Please try returning to
+            the homepage and starting a new Jam.
+          </p>
+          <Button onClick={() => router.push('/')} size="lg">
+            Go to Homepage
+          </Button>
         </div>
-        {/* Sidebar/Details Area (Optional - might be needed later) */}
-        {/* <div className="w-1/4 border-l p-4">Sidebar Placeholder</div> */}
-        <ActionBar
-          selectedCount={selectedImageIds.size}
-          onPublish={handleOpenPublishSheet}
-          // onSave can be omitted if not implemented, or provide a placeholder
-          // onSave={() => toast.info('Save feature coming soon!')}
+      </ProtectedPage>
+    )
+  }
+
+  // If resolvedJamId is available (and not initializing)
+  return (
+    <ProtectedPage>
+      <div className="flex h-[calc(100vh-theme(spacing.14)-1px)] flex-col">
+        <JamToolbar
+          selectedSize={selectedSize}
+          onSizeChange={handleSizeChange}
+          jamId={resolvedJamId} // Use resolvedJamId here
         />
-      </div>
-      {/* Render the real ImageStrip with state */}
-      <ImageStrip
-        images={generatedImages}
-        selectedImageIds={selectedImageIds}
-        onImageSelect={handleImageSelect}
-      />
-      <div className="p-2 text-xs text-muted-foreground bg-secondary">
-        Jam ID: {jamId} {isLoadingMessages ? '(Loading messages...)' : ''}
-        {messagesError ? ` (Error: ${messagesError.message})` : ''}
+        <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
+          <div className="flex flex-1 flex-col overflow-y-auto p-4 md:border-r">
+            {isLoadingMessages && resolvedJamId && (
+              <div className="flex justify-center items-center h-full">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <p className="ml-2 text-muted-foreground">
+                  Loading messages...
+                </p>
+              </div>
+            )}
+            {!isLoadingMessages && <MessageList messages={displayMessages} />}
+          </div>
+          <div className="flex flex-col border-t p-4 md:w-72 md:border-l md:border-t-0">
+            <ImageStrip
+              images={jamGeneratedImages}
+              selectedImageIds={selectedImageIds}
+              onImageSelect={handleImageSelect}
+              onImageActivate={handleImageActivate}
+            />
+            {selectedImageIds.size > 0 && (
+              <ActionBar
+                selectedCount={selectedImageIds.size}
+                onPublish={handleOpenPublishSheet}
+              />
+            )}
+            {jamGeneratedImages.length === 0 && !isGenerating && (
+              <div className="flex flex-col items-center justify-center text-center text-sm text-muted-foreground pt-10">
+                <p>Your generated images will appear here.</p>
+                {isInitializing && <p>(Initializing session...)</p>}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="border-t p-4">
+          <ChatInput
+            onSubmit={handleSubmitPrompt} // Renamed from handleSendMessage
+            isLoading={isGenerating}
+          />
+        </div>
       </div>
       <PublishSheet
         isOpen={isPublishSheetOpen}
         onOpenChange={setIsPublishSheetOpen}
         selectedImages={imagesToPublish}
-        onPublish={handlePublishSubmit}
+        onSubmit={publishPost}
         isSubmitting={isPublishingPost}
+        initialTitle={initialPublishData?.title || ''}
+        initialTags={initialPublishData?.tags || []}
       />
-    </div>
+      {lightboxImage && (
+        <ImageLightbox
+          isOpen={lightboxOpen}
+          onOpenChange={setLightboxOpen}
+          imageUrl={lightboxImage.url}
+          altText={`Generated image ${lightboxImage.id}`}
+        />
+      )}
+    </ProtectedPage>
   )
 }

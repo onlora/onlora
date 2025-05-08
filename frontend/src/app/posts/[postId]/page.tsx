@@ -1,5 +1,6 @@
 'use client'
 
+import type { MessageImage } from '@/lib/api/jamApi'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNowStrict } from 'date-fns'
 import {
@@ -13,12 +14,16 @@ import {
   Share2,
 } from 'lucide-react'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 
 import CommentInput from '@/components/comments/CommentInput'
 import CommentItem from '@/components/comments/CommentItem'
+import { ImageLightbox } from '@/components/jam/ImageLightbox'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,13 +40,13 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 import {
   type CommentWithAuthor,
+  type CreateCommentPayload,
   createComment,
   getComments,
 } from '@/lib/api/commentApi'
 import {
   type PostDetails,
   type ToggleLikeResponse,
-  getPostCloneInfo,
   getPostDetails,
   toggleLikePost,
 } from '@/lib/api/postApi'
@@ -52,6 +57,12 @@ const getInitials = (name?: string | null) => {
   const names = name.split(' ')
   if (names.length === 1) return names[0][0]?.toUpperCase() ?? 'U'
   return (names[0][0] + (names[names.length - 1][0] || '')).toUpperCase()
+}
+
+// Type definition for the reply target state
+interface CommentReplyTarget {
+  id: number // ID of the comment being replied to
+  authorName: string // Name of the author being replied to
 }
 
 export default function PostDetailPage() {
@@ -72,7 +83,12 @@ export default function PostDetailPage() {
     image: string | null
   } | null>(null)
 
-  const [isRemixing, setIsRemixing] = useState(false)
+  // Lightbox state
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [replyTarget, setReplyTarget] = useState<CommentReplyTarget | null>(
+    null,
+  )
+  const commentInputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     setTimeout(() => {
@@ -113,6 +129,44 @@ export default function PostDetailPage() {
     },
     enabled: !!postIdString,
   })
+
+  // Process comments for hierarchical display
+  const { topLevelComments, commentsById } = useMemo(() => {
+    // Using Record for better type inference with numeric keys
+    const commentsByIdMap: Record<number, CommentWithAuthor> = {}
+    const topLevelCommentsList: CommentWithAuthor[] = []
+
+    if (!comments) {
+      return {
+        topLevelComments: topLevelCommentsList,
+        commentsById: commentsByIdMap,
+      }
+    }
+
+    for (const comment of comments) {
+      commentsByIdMap[comment.id] = { ...comment }
+    }
+
+    for (const comment of comments) {
+      if (comment.parentId === null) {
+        topLevelCommentsList.push(commentsByIdMap[comment.id])
+      }
+      // Note: We are NOT building a nested children array here.
+      // CommentItem will look up children using commentsByIdMap and comment.id
+    }
+
+    // Sort top-level by date
+    topLevelCommentsList.sort(
+      (a, b) =>
+        new Date(a.createdAt || 0).getTime() -
+        new Date(b.createdAt || 0).getTime(),
+    )
+
+    return {
+      topLevelComments: topLevelCommentsList,
+      commentsById: commentsByIdMap,
+    }
+  }, [comments])
 
   const likeMutation = useMutation<
     ToggleLikeResponse,
@@ -174,15 +228,21 @@ export default function PostDetailPage() {
   const createCommentMutation = useMutation<
     CommentWithAuthor,
     Error,
-    { body: string; parentId?: number },
+    { body: string; parentId?: number | undefined },
     { previousComments?: CommentWithAuthor[]; optimisticCommentId?: number }
   >({
-    mutationFn: async ({ body, parentId }) => {
-      if (!post || !post.id)
-        throw new Error('Post not loaded or post ID missing for createComment')
-      return createComment({ postId: Number(post.id), body, parentId })
+    mutationFn: async ({
+      body,
+      parentId,
+    }: { body: string; parentId?: number | undefined }) => {
+      if (!post || !post.id) throw new Error('Post not loaded')
+      const payload: CreateCommentPayload = { postId: Number(post.id), body }
+      if (parentId !== undefined) {
+        payload.parentId = parentId
+      }
+      return createComment(payload)
     },
-    onMutate: async (newCommentData) => {
+    onMutate: async ({ parentId, body }) => {
       if (!postIdString || !currentUser || !post || !post.id) return {}
 
       await queryClient.cancelQueries({ queryKey: ['comments', postIdString] })
@@ -197,8 +257,8 @@ export default function PostDetailPage() {
         id: optimisticCommentId,
         postId: Number(post.id),
         userId: currentUser.id,
-        parentId: newCommentData.parentId || null,
-        body: newCommentData.body,
+        parentId: parentId ?? null,
+        body: body,
         createdAt: new Date().toISOString(),
         author: {
           id: currentUser.id,
@@ -270,40 +330,79 @@ export default function PostDetailPage() {
     },
   })
 
-  const handleCreateComment = async (body: string, parentId?: number) => {
-    if (!post || !currentUser) {
-      toast.error('You must be logged in to comment or post not loaded.')
-      return
-    }
-    if (!body.trim()) {
-      toast.error('Comment cannot be empty.')
-      return
-    }
-    await createCommentMutation.mutate({ body, parentId })
-  }
+  const handleCommentSubmit = useCallback(
+    async (body: string) => {
+      if (!post || !currentUser) {
+        toast.error('Cannot submit comment.')
+        return
+      }
+      if (!body.trim()) {
+        toast.error('Comment cannot be empty.')
+        return
+      }
+
+      const parentId: number | undefined = replyTarget
+        ? replyTarget.id
+        : undefined
+
+      await createCommentMutation.mutate(
+        { body, parentId },
+        {
+          onSuccess: () => {
+            setReplyTarget(null)
+          },
+          onError: () => {
+            // Maybe clear reply target even on error?
+          },
+        },
+      )
+    },
+    [post, currentUser, replyTarget, createCommentMutation],
+  )
+
+  const cancelReply = useCallback(() => {
+    setReplyTarget(null)
+  }, [])
 
   const handleRemixClick = async () => {
     if (!postIdString) return
-    setIsRemixing(true)
-    try {
-      toast.info('Fetching post info for remix...')
-      const cloneInfo = await getPostCloneInfo(postIdString)
-      console.log('Clone Info:', cloneInfo) // Log for debugging
-
-      // TODO: Navigate to Jam UI with cloneInfo
-      // Example: Pass data via query params or state management
-      // router.push(`/jam/new?prompt=${encodeURIComponent(cloneInfo.prompt || '')}&model=${cloneInfo.model || 'default'}&parentPostId=${cloneInfo.parentPostId}&rootPostId=${cloneInfo.rootPostId}&generation=${cloneInfo.generation}`);
-      router.push('/jam/remix-placeholder') // Placeholder navigation
-      toast.success('Starting remix session!')
-    } catch (error: unknown) {
-      console.error('Failed to get post info for remixing:', error)
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error'
-      toast.error(`Failed to start remix: ${errorMessage}`)
-    } finally {
-      setIsRemixing(false)
-    }
+    router.push(`/jam/new?remixSourcePostId=${postIdString}`)
   }
+
+  const handleShareClick = () => {
+    const url = window.location.href
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        toast.success('Link copied to clipboard!')
+      })
+      .catch((err) => {
+        console.error('Failed to copy link: ', err)
+        toast.error('Failed to copy link.')
+      })
+  }
+
+  const handleBookmarkClick = () => {
+    toast.info('Bookmark feature coming soon!')
+  }
+
+  const handleReplyClick = useCallback(
+    (commentId: number, authorName: string) => {
+      if (!currentUser) {
+        toast.error('Please log in to reply.')
+        return
+      }
+      setReplyTarget({ id: commentId, authorName })
+      setTimeout(() => {
+        commentInputRef.current?.focus()
+        commentInputRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+        })
+      }, 50)
+    },
+    [currentUser],
+  )
 
   if (!postIdString) {
     return (
@@ -371,6 +470,15 @@ export default function PostDetailPage() {
     )
   }
 
+  // Prepare image data for Lightbox
+  const lightboxImage: MessageImage | null = post.coverImg
+    ? {
+        id: Number(post.id), // Use post ID as a pseudo image ID for this context
+        url: post.coverImg,
+        // r2Key is not available here
+      }
+    : null
+
   return (
     <Card className="container mx-auto max-w-3xl my-6 shadow-lg dark:border-gray-700">
       <CardHeader>
@@ -405,9 +513,35 @@ export default function PostDetailPage() {
             </Button>
           </div>
         </div>
-        <h1 className="text-2xl font-bold leading-tight text-gray-900 dark:text-gray-50">
-          {post.title}
-        </h1>
+        {post.parentPost && (
+          <div className="mb-2 text-sm text-muted-foreground">
+            <Repeat size={14} className="inline-block mr-1 -mt-0.5" />
+            Inspired by:{' '}
+            <Link
+              href={`/posts/${post.parentPost.id}`}
+              className="hover:underline text-primary"
+            >
+              &ldquo;{post.parentPost.title || 'a previous vibe'}&rdquo;
+            </Link>
+            {post.parentPost.author && (
+              <>
+                {' by '}
+                <Link
+                  href={`/u/${post.parentPost.author.username}`}
+                  className="hover:underline text-primary"
+                >
+                  @
+                  {post.parentPost.author.username ||
+                    post.parentPost.author.name ||
+                    'another user'}
+                </Link>
+              </>
+            )}
+          </div>
+        )}
+        {post.title && (
+          <h2 className="text-xl font-semibold mb-2">{post.title}</h2>
+        )}
         {post.tags && post.tags.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-2">
             {post.tags.map((tag: string) => (
@@ -423,20 +557,27 @@ export default function PostDetailPage() {
         )}
       </CardHeader>
 
-      <CardContent>
+      <CardContent className="pb-4 pt-0">
         {post.coverImg && (
-          <div className="mb-4 relative aspect-[16/9] w-full overflow-hidden rounded-lg border dark:border-gray-700">
+          <button
+            type="button"
+            className="relative block aspect-video w-full mb-6 bg-muted rounded-lg overflow-hidden cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-0 border-0"
+            onClick={() => setLightboxOpen(true)}
+            aria-label={`View image: ${post.title || 'Untitled Vibe'}`}
+          >
             <Image
               src={post.coverImg}
-              alt={`Cover image for ${post.title}`}
-              layout="fill"
-              objectFit="cover"
-              priority // Consider if this is always the LCP
+              alt={post.title || 'Post image'}
+              fill
+              className="object-contain"
+              priority
             />
-          </div>
+          </button>
         )}
-        <div className="prose prose-sm sm:prose dark:prose-invert max-w-none whitespace-pre-wrap">
-          {post.description || 'No description available.'}
+        <div className="prose dark:prose-invert max-w-none mb-6">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {post.description || 'No description available.'}
+          </ReactMarkdown>
         </div>
 
         <div className="mt-3 text-xs text-gray-500 dark:text-gray-400 flex items-center">
@@ -450,54 +591,51 @@ export default function PostDetailPage() {
       <CardFooter className="py-3 px-4 sm:px-6 flex items-center justify-start space-x-1 sm:space-x-2 bg-gray-50 dark:bg-gray-800/30">
         <Button
           variant="ghost"
-          size="sm"
-          className={`flex items-center text-sm ${post.isLiked ? 'text-red-500' : 'text-gray-500 dark:text-gray-400'} hover:text-red-600 dark:hover:text-red-400`}
+          size="icon"
+          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
           onClick={() => likeMutation.mutate()}
-          disabled={likeMutation.isPending || !post}
+          disabled={likeMutation.isPending}
         >
-          <Heart
-            className={`mr-1.5 h-4 w-4 ${post.isLiked ? 'fill-current' : ''}`}
-          />
-          {post.likeCount} {post.likeCount === 1 ? 'Like' : 'Likes'}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="flex items-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-        >
-          <MessageSquare className="mr-1.5 h-4 w-4" />
-          {post.commentCount} {post.commentCount === 1 ? 'Comment' : 'Comments'}
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="hidden sm:flex items-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-          onClick={handleRemixClick}
-          disabled={isRemixing || !post || post.visibility !== 'public'}
-        >
-          {isRemixing ? (
-            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+          {likeMutation.isPending ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : post.isLiked ? (
+            <Heart className="h-5 w-5 text-red-500 fill-red-500" />
           ) : (
-            <Repeat className="mr-1.5 h-4 w-4" />
+            <Heart className="h-5 w-5" />
           )}
-          Remix
         </Button>
         <Button
           variant="ghost"
-          size="sm"
-          className="hidden sm:flex items-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          size="icon"
+          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          onClick={() => commentInputRef.current?.focus()}
         >
-          <Share2 className="mr-1.5 h-4 w-4" />
-          Share
+          <MessageSquare className="h-5 w-5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          onClick={handleRemixClick}
+        >
+          <Repeat className="h-5 w-5" />
         </Button>
         <div className="flex-grow" />
         <Button
           variant="ghost"
-          size="sm"
-          className="flex items-center text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+          size="icon"
+          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          onClick={handleBookmarkClick}
         >
-          <Bookmark className="mr-1.5 h-4 w-4" />
-          Save
+          <Bookmark className="h-5 w-5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+          onClick={handleShareClick}
+        >
+          <Share2 className="h-5 w-5" />
         </Button>
       </CardFooter>
 
@@ -511,10 +649,12 @@ export default function PostDetailPage() {
 
         {currentUser && post && post.id && (
           <CommentInput
-            postId={Number(post.id)}
-            onSubmit={handleCreateComment}
+            onSubmit={handleCommentSubmit}
             currentUser={currentUser}
             isLoading={createCommentMutation.isPending}
+            replyTarget={replyTarget}
+            onCancelReply={cancelReply}
+            ref={commentInputRef}
           />
         )}
         {!currentUser && (
@@ -543,8 +683,15 @@ export default function PostDetailPage() {
           comments &&
           comments.length > 0 && (
             <div className="mt-4 space-y-0 divide-y divide-gray-200 dark:divide-gray-700 border-t border-gray-200 dark:border-gray-700">
-              {comments.map((comment) => (
-                <CommentItem key={comment.id} comment={comment} />
+              {topLevelComments.map((comment) => (
+                <CommentItem
+                  key={comment.id}
+                  comment={comment}
+                  allCommentsById={commentsById}
+                  nestingLevel={0}
+                  currentUserId={currentUser?.id}
+                  onReply={handleReplyClick}
+                />
               ))}
             </div>
           )}
@@ -556,6 +703,16 @@ export default function PostDetailPage() {
             </p>
           )}
       </div>
+
+      {/* Lightbox Component */}
+      {lightboxImage && (
+        <ImageLightbox
+          isOpen={lightboxOpen}
+          onOpenChange={setLightboxOpen}
+          imageUrl={lightboxImage.url}
+          altText={post.title || 'Post image'}
+        />
+      )}
     </Card>
   )
 }

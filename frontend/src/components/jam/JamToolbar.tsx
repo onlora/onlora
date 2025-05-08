@@ -18,12 +18,13 @@ export type ImageSize = '512x512' | '768x768' | '1024x1024'
 interface JamToolbarProps {
   selectedSize: ImageSize
   onSizeChange: (size: ImageSize) => void
-  // TODO: Add props for jamId or other context if needed for links
+  jamId: string | null // Add jamId prop, can be null if it's a new jam not yet created
 }
 
 export const JamToolbar: React.FC<JamToolbarProps> = ({
   selectedSize,
   onSizeChange,
+  jamId,
 }) => {
   return (
     <div className="p-2 px-4 border-b bg-card flex justify-between items-center">
@@ -71,13 +72,21 @@ export const JamToolbar: React.FC<JamToolbarProps> = ({
 
       {/* Right side controls (e.g., Gallery) */}
       <div>
-        {/* Link to Gallery - Adjust href as needed */}
-        <Link href="/gallery" passHref legacyBehavior>
+        <Link
+          href={
+            jamId && jamId !== 'new'
+              ? `/gallery?fromJamId=${jamId}`
+              : '/gallery'
+          }
+          passHref
+          legacyBehavior
+        >
           <Button
             variant="ghost"
             size="icon"
             aria-label="My Gallery"
             title="My Gallery"
+            disabled={!jamId || jamId === 'new'} // Disable if jamId is not yet available
           >
             <GalleryHorizontalEnd className="h-5 w-5" />
           </Button>

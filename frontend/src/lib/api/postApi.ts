@@ -35,6 +35,7 @@ export interface PostAuthor {
   id: string
   name: string | null
   image: string | null // Avatar URL
+  username?: string // Added optional username for authors
 }
 
 export interface PostImage {
@@ -45,22 +46,32 @@ export interface PostImage {
 export interface PostDetails {
   id: number
   title: string | null
-  description: string | null
+  description: string | null // This is bodyMd from backend
   tags: string[] | null
   visibility: 'public' | 'private' | null
   coverImg: string | null
   createdAt: string | null // Date comes as string typically
-  authorId: string | null
+  authorId: string | null // ID of the author user object
   likeCount: number | null
   commentCount: number | null
   remixCount: number | null
-  parentPostId: number | null
+  viewCount?: number // viewCount is correctly here
+  parentPostId: number | null // ID of the parent post, if this is a remix
   rootPostId: number | null
   generation: number | null
-  author: PostAuthor | null
-  images: PostImage[] // Assuming images are always returned as an array, even if empty
-  isLiked?: boolean
-  viewCount?: number
+  author: PostAuthor | null // The author object
+  images: PostImage[] // Array of images associated with the post
+  isLiked?: boolean // Whether the current user has liked this post
+  parentPost?: {
+    // This is where parentPost should be
+    id: number
+    title: string | null
+    author: {
+      id: string
+      username: string
+      name: string | null
+    } | null
+  } | null
 }
 
 /**
@@ -102,8 +113,9 @@ export async function toggleLikePost(
 // --- Get Post Clone Info (for Remix) --- //
 
 export interface PostCloneInfo {
-  prompt: string | null
-  model: string | null
+  title: string | undefined // Updated to match backend response
+  tags: string[] | undefined
+  coverImgUrl: string | undefined
   parentPostId: number
   rootPostId: number
   generation: number
@@ -118,5 +130,44 @@ export async function getPostCloneInfo(postId: string): Promise<PostCloneInfo> {
   }
   return apiClient<PostCloneInfo>(`/posts/${postId}/clone`, {
     credentials: 'include',
+  })
+}
+
+// --- Delete Post --- //
+export async function deleteMyPost(postId: string): Promise<void> {
+  if (!postId || Number.isNaN(Number(postId))) {
+    throw new Error('Invalid Post ID provided for deletion.')
+  }
+  // Backend should handle auth and ownership
+  return apiClient<void>(`/posts/${postId}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+}
+
+// --- Update Post --- //
+export interface UpdatePostPayload {
+  title?: string
+  description?: string | null
+  tags?: string[] | null
+  visibility?: 'public' | 'private'
+}
+
+// Assuming PostDetails is the response type for an updated post as well
+export async function updateMyPost(
+  postId: string,
+  payload: UpdatePostPayload,
+): Promise<PostDetails> {
+  if (!postId || Number.isNaN(Number(postId))) {
+    throw new Error('Invalid Post ID provided for update.')
+  }
+  if (Object.keys(payload).length === 0) {
+    throw new Error('No update data provided.')
+  }
+  // Backend should handle auth and ownership
+  return apiClient<PostDetails, UpdatePostPayload>(`/posts/${postId}`, {
+    method: 'PATCH',
+    credentials: 'include',
+    body: payload,
   })
 }

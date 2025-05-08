@@ -48,6 +48,18 @@ const postIdParamSchema = z.object({
     .transform(Number),
 })
 
+// --- Zod schema for the response of the clone endpoint ---
+const postCloneDataSchema = z.object({
+  title: z.string().optional(), // e.g., "Remix: Original Title"
+  tags: z.array(z.string()).optional(),
+  coverImgUrl: z.string().url().optional(),
+  // imageIds: z.array(z.number().int().positive()).optional(), // If we decide to clone image associations by ID
+  parentPostId: z.number().int().positive(),
+  rootPostId: z.number().int().positive(),
+  generation: z.number().int().nonnegative(),
+  // Potentially a snippet of bodyMd if desired
+})
+
 // Define the specific Environment for this router, including Variables and potential ValidatedData shapes
 // Note: ValidatedData might not be strictly necessary here if we parse manually inside handlers
 interface PostRoutesAppEnv extends AuthenticatedContextEnv {}
@@ -75,6 +87,7 @@ interface PostQueryResult {
   generation: number | null
   author: {
     id: string
+    username: string
     name: string | null // Assuming name is nullable based on schema
     image: string | null
   } | null // Author relation might be null if authorId is null
@@ -88,6 +101,16 @@ interface PostQueryResult {
       url: string
     } | null // Image relation might be null
   }>
+  parentPost?: {
+    // Added parentPost to the result type
+    id: number
+    title: string | null
+    author: {
+      id: string
+      username: string
+      name: string | null
+    } | null
+  } | null
 }
 
 // --- Helper Type for Comment Query Result ---
@@ -104,6 +127,7 @@ interface CommentWithUser {
     id: string
     name: string | null
     image: string | null
+    username: string | null
   } | null // User might be null if userId is null in comments table
 }
 
@@ -186,25 +210,23 @@ postRoutes.post(
           await tx.insert(veTxns).values({
             userId: userId,
             delta: veGrantPublic,
-            reason: 'Published public post',
+            reason: 'publish_public_post', // Standardized reason
             refId: postId,
           })
         }
 
-        // 4. Handle Remix-specific updates (if parentPostId is provided)
-        if (payload.parentPostId) {
+        // 4. Handle Remix-specific updates (if parentPostId is provided AND the new post is public)
+        if (payload.parentPostId && payload.visibility === 'public') {
           // Find the parent post author ID
           const parentPost = await tx.query.posts.findFirst({
             where: eq(posts.id, payload.parentPostId),
             columns: { authorId: true },
           })
+
           if (!parentPost || !parentPost.authorId) {
-            // Throw error or handle case where parent post/author is missing
             console.warn(
-              `Parent post ${payload.parentPostId} or its author not found during remix processing.`,
+              `Parent post ${payload.parentPostId} or its author not found during remix processing for public post ${postId}.`,
             )
-            // Depending on desired behavior, you might throw an error here to rollback
-            // throw new Error(`Parent post ${payload.parentPostId} not found`);
           } else {
             const parentAuthorId = parentPost.authorId
             const veGrantRemix = 1
@@ -225,11 +247,9 @@ postRoutes.post(
             await tx.insert(veTxns).values({
               userId: parentAuthorId,
               delta: veGrantRemix,
-              reason: 'Remix source', // Or 'Work Remixed'
-              refId: payload.parentPostId, // Link to the parent post
+              reason: 'remix_bonus', // Reason for the parent author receiving VE
+              refId: postId, // Reference to the NEW post (the remix)
             })
-            // Optional: Record VE transaction for the remixer (if any cost/reward)
-            // await tx.insert(veTxns).values({ userId: userId, delta: 0, reason: 'Remixed post', refId: postId });
           }
         }
 
@@ -292,12 +312,21 @@ postRoutes.get(
         where: eq(posts.id, postId),
         with: {
           author: {
-            columns: { id: true, name: true, image: true },
+            columns: { id: true, name: true, image: true, username: true },
           },
           postImages: {
             with: {
-              image: {
-                columns: { id: true, url: true },
+              image: { columns: { id: true, url: true } },
+            },
+            columns: { imageId: true },
+          },
+          parentPost: {
+            // Fetch parentPost details
+            columns: { id: true, title: true },
+            with: {
+              author: {
+                // And its author
+                columns: { id: true, username: true, name: true },
               },
             },
           },
@@ -328,27 +357,9 @@ postRoutes.get(
       }
 
       const responseData = {
-        id: postData.id,
-        title: postData.title,
-        description: postData.bodyMd, // Map bodyMd to description
-        tags: postData.tags,
-        visibility: postData.visibility,
-        coverImg: postData.coverImg, // Changed back to coverImg
-        createdAt: postData.createdAt?.toISOString(), // Ensure date is ISO string, used optional chain
-        authorId: postData.authorId,
-        likeCount: postData.likeCount,
-        commentCount: postData.commentCount,
-        remixCount: postData.remixCount,
-        viewCount: postData.viewCount, // Ensure viewCount is included
-        parentPostId: postData.parentPostId,
-        rootPostId: postData.rootPostId,
-        generation: postData.generation,
-        author: postData.author,
-        images: postData.postImages
-          .map((pi) => pi.image)
-          .filter((img) => img != null) as Array<{ id: number; url: string }>,
-        isLiked: isLikedByCurrentUser, // Add isLiked field
-        // viewCount will be added in a subsequent step
+        ...postData,
+        images: postData.postImages.map((pi) => pi.image).filter(Boolean),
+        isLiked: isLikedByCurrentUser,
       }
 
       return c.json(responseData, 200)
@@ -513,7 +524,7 @@ postRoutes.get(
         with: {
           user: {
             // Correct relation name
-            columns: { id: true, name: true, image: true },
+            columns: { id: true, name: true, image: true, username: true },
           },
         },
         orderBy: [asc(commentsSchema.createdAt)], // Use explicit schema import
@@ -537,105 +548,216 @@ postRoutes.get(
   },
 )
 
-// GET /api/posts/:postId/clone - Get information to clone/remix a post
+// GET /api/posts/:postId/clone - Get data for remixing a post
 postRoutes.get(
   '/:postId/clone',
+  requireAuthMiddleware, // Optional: decide if cloning requires auth
+  zValidator('param', postIdParamSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid Post ID format',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const { postId } = c.req.valid('param')
+
+    try {
+      const originalPost = await db.query.posts.findFirst({
+        where: eq(posts.id, postId),
+        columns: {
+          id: true,
+          title: true,
+          tags: true,
+          coverImg: true,
+          rootPostId: true,
+          generation: true,
+          // Potentially include postImages relation if we want to suggest original images
+        },
+        // Example of how to include related images if needed:
+        // with: {
+        //   postImages: { columns: { imageId: true } }
+        // }
+      })
+
+      if (!originalPost) {
+        throw new HTTPException(404, { message: 'Original post not found' })
+      }
+
+      const cloneData: z.infer<typeof postCloneDataSchema> = {
+        title: originalPost.title ? `Remix: ${originalPost.title}` : undefined,
+        tags: originalPost.tags ?? undefined,
+        coverImgUrl: originalPost.coverImg ?? undefined,
+        parentPostId: originalPost.id,
+        rootPostId: originalPost.rootPostId ?? originalPost.id, // If no root, original is the root
+        generation: (originalPost.generation ?? 0) + 1,
+        // imageIds: originalPost.postImages?.map(pi => pi.imageId) // If fetching postImages
+      }
+
+      return c.json(cloneData)
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(`Error cloning post ${postId}:`, error)
+      throw new HTTPException(500, {
+        message: 'Failed to get post data for cloning',
+      })
+    }
+  },
+)
+
+// Zod schema for updating a post
+const updatePostSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(255).optional(),
+  description: z.string().max(10000).optional().nullable(), // Corresponds to bodyMd
+  tags: z.array(z.string().max(50)).max(10).optional().nullable(),
+  visibility: z.enum(visibilityEnum.enumValues).optional(),
+  // imageIds and coverImg are not typically updated here, that might be a separate flow
+  // or a more complex update if cover image derived from imageIds changes.
+})
+
+// PATCH /api/posts/:postId - Update a post
+postRoutes.patch(
+  '/:postId',
   requireAuthMiddleware,
   zValidator('param', postIdParamSchema, (result, c) => {
     if (!result.success) {
       throw new HTTPException(400, {
         message: 'Invalid Post ID format',
-        cause: result.error,
+        cause: result.error.flatten(),
       })
     }
   }),
-  async (c: Context<PostRoutesAppEnv>) => {
+  zValidator('json', updatePostSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid update data format',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
     const user = c.get('user')
     if (!user || !user.id) {
-      // Should be caught by requireAuthMiddleware, but as a safeguard
       throw new HTTPException(401, { message: 'Authentication required' })
     }
+    const userId = user.id
+    const { postId } = c.req.valid('param')
+    const updatePayload = c.req.valid('json')
 
-    let postId: number
-    try {
-      const params = postIdParamSchema.parse(c.req.param())
-      postId = params.postId
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        throw new HTTPException(400, {
-          message: 'Invalid Post ID format',
-          cause: error,
-        })
-      }
-      // For other unexpected errors during param parsing
-      throw new HTTPException(400, { message: 'Invalid request parameters' })
+    if (Object.keys(updatePayload).length === 0) {
+      throw new HTTPException(400, { message: 'No update data provided.' })
     }
 
     try {
-      // 1. Fetch the source post
-      const sourcePost = await db.query.posts.findFirst({
+      const postToUpdate = await db.query.posts.findFirst({
         where: eq(posts.id, postId),
-        columns: {
-          id: true,
-          coverImg: true,
-          parentPostId: true,
-          rootPostId: true,
-          generation: true,
-          visibility: true,
-          // Potentially authorId if we need to check ownership for non-public posts, though remixing usually implies public.
-        },
+        columns: { id: true, authorId: true },
       })
 
-      if (!sourcePost) {
-        throw new HTTPException(404, { message: 'Source post not found' })
+      if (!postToUpdate) {
+        throw new HTTPException(404, { message: 'Post not found' })
       }
 
-      // For now, let's assume only public posts can be remixed.
-      // This can be adjusted based on product requirements.
-      if (sourcePost.visibility !== 'public') {
+      if (postToUpdate.authorId !== userId) {
         throw new HTTPException(403, {
-          message: 'Only public posts can be remixed',
+          message: 'Forbidden: You do not have permission to update this post',
         })
       }
 
-      // 2. Find prompt and model for the cover image
-      let imagePrompt: string | null = null
-      let imageModel: string | null = null
+      const updateData: {
+        title?: string
+        bodyMd?: string | null
+        tags?: string[] | null
+        visibility?: 'public' | 'private'
+        updatedAt?: Date // For manual timestamp update
+      } = {}
 
-      if (sourcePost.coverImg) {
-        const coverImageDetails = await db.query.images.findFirst({
-          where: eq(images.url, sourcePost.coverImg),
-          columns: { prompt: true, model: true },
+      if (updatePayload.title !== undefined)
+        updateData.title = updatePayload.title
+      if (updatePayload.description !== undefined)
+        updateData.bodyMd = updatePayload.description // map description to bodyMd
+      if (updatePayload.tags !== undefined) updateData.tags = updatePayload.tags
+      if (updatePayload.visibility !== undefined)
+        updateData.visibility = updatePayload.visibility
+
+      // Only set updatedAt if there are actual fields to update
+      if (Object.keys(updateData).length > 0) {
+        updateData.updatedAt = new Date()
+      }
+      // If Object.keys(updateData) is 0 here (excluding potential updatedAt),
+      // it means only undefined optional fields were passed, which is fine,
+      // but the DB update call might be a no-op or an error if empty set is disallowed.
+      // However, the top-level check for empty updatePayload should prevent this.
+
+      const [updatedPost] = await db
+        .update(posts)
+        .set(updateData)
+        .where(eq(posts.id, postId))
+        .returning() // Return all fields of the updated post
+
+      if (!updatedPost) {
+        // Should not happen if ownership check passed and post existed
+        throw new HTTPException(500, {
+          message: 'Failed to update post after verification.',
         })
-        if (coverImageDetails) {
-          imagePrompt = coverImageDetails.prompt
-          imageModel = coverImageDetails.model
-        }
       }
 
-      // 3. Determine rootPostId and generation
-      const parentPostIdForRemix = sourcePost.id
-      const rootPostIdForRemix = sourcePost.rootPostId ?? sourcePost.id // If no root, this is the root
-      const currentGeneration = sourcePost.generation ?? 0 // Assume 0 if null
-      const nextGeneration = currentGeneration + 1
-
-      const cloneInfo = {
-        prompt: imagePrompt,
-        model: imageModel,
-        parentPostId: parentPostIdForRemix,
-        rootPostId: rootPostIdForRemix,
-        generation: nextGeneration,
-      }
-
-      return c.json(cloneInfo, 200)
+      return c.json(updatedPost)
     } catch (error) {
-      if (error instanceof HTTPException) {
-        throw error // Re-throw known HTTP errors
-      }
-      console.error(`Error fetching post clone info for post ${postId}:`, error)
-      throw new HTTPException(500, {
-        message: 'Failed to fetch post clone information',
+      if (error instanceof HTTPException) throw error
+      console.error(`Error updating post ${postId} by user ${userId}:`, error)
+      throw new HTTPException(500, { message: 'Failed to update post' })
+    }
+  },
+)
+
+// DELETE /api/posts/:postId - Delete a post
+postRoutes.delete(
+  '/:postId',
+  requireAuthMiddleware,
+  zValidator('param', postIdParamSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid Post ID format',
+        cause: result.error.flatten(),
       })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+    const userId = user.id
+    const { postId } = c.req.valid('param')
+
+    try {
+      const postToDelete = await db.query.posts.findFirst({
+        where: eq(posts.id, postId),
+        columns: { id: true, authorId: true },
+      })
+
+      if (!postToDelete) {
+        throw new HTTPException(404, { message: 'Post not found' })
+      }
+
+      if (postToDelete.authorId !== userId) {
+        throw new HTTPException(403, {
+          message: 'Forbidden: You do not have permission to delete this post',
+        })
+      }
+
+      await db.delete(posts).where(eq(posts.id, postId))
+
+      return c.json(
+        { success: true, message: 'Post deleted successfully' },
+        200,
+      )
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(`Error deleting post ${postId} by user ${userId}:`, error)
+      throw new HTTPException(500, { message: 'Failed to delete post' })
     }
   },
 )

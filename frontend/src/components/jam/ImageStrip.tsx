@@ -11,6 +11,7 @@ interface ImageStripProps {
   images: MessageImage[]
   selectedImageIds?: Set<number> // Optional: Set of selected image IDs
   onImageSelect?: (imageId: number) => void // Optional: Callback for selection
+  onImageActivate?: (image: MessageImage) => void // Optional: Callback for activating/viewing an image
   // Add other props like loading state if needed
 }
 
@@ -42,6 +43,7 @@ export const ImageStrip: React.FC<ImageStripProps> = ({
   images = placeholderStripImages, // Use placeholder as default for now
   selectedImageIds = new Set(),
   onImageSelect = () => {},
+  onImageActivate = () => {}, // Default for new prop
 }) => {
   if (!images || images.length === 0) {
     // Optionally render a placeholder or empty state
@@ -67,7 +69,10 @@ export const ImageStrip: React.FC<ImageStripProps> = ({
                     ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
                     : '',
                 )}
-                onClick={() => onImageSelect(image.id)}
+                onClick={() => {
+                  onImageSelect(image.id)
+                  onImageActivate(image) // Call new handler
+                }}
               >
                 <Image
                   src={image.url}
@@ -105,4 +110,3 @@ export const ImageStrip: React.FC<ImageStripProps> = ({
     </div>
   )
 }
- 
