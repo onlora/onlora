@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:17
+    container_name: onlora_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-onlora_db}
+      POSTGRES_USER: ${POSTGRES_USER:-onlora_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yoursecurepassword} # Use .env file for actual password
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: onlora_backend
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development # Or production, depending on use case
+      DATABASE_URL: postgresql://${POSTGRES_USER:-onlora_user}:${POSTGRES_PASSWORD:-yoursecurepassword}@db:5432/${POSTGRES_DB:-onlora_db}
+      JWT_SECRET: ${JWT_SECRET:-averysecuresecretkeyforlocaldev}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      NEXTAUTH_URL: ${BACKEND_PUBLIC_URL:-http://localhost:8080}
+      AUTH_TRUST_HOST: "true"
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_PUBLIC_URL_BASE: ${R2_PUBLIC_URL_BASE}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PORT: 8080
+    volumes:
+      - ./backend:/app # Mount code for local development, remove for production image testing
+      - /app/node_modules # Anonymous volume to prevent host node_modules from overwriting container's
+    restart: unless-stopped
+    # command: ["dumb-init", "node", "dist/backend/src/index.js"] # If your Dockerfile doesn't have CMD
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: onlora_worker
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-onlora_user}:${POSTGRES_PASSWORD:-yoursecurepassword}@db:5432/${POSTGRES_DB:-onlora_db}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_PUBLIC_URL_BASE: ${R2_PUBLIC_URL_BASE}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - ./backend:/app # Mount code for local development
+      - /app/node_modules
+    command: ["node", "dist/backend/src/workerRunner.js"] # Override CMD from Dockerfile
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: onlora_frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_BASE_URL: http://backend:8080 # Service discovery using Docker Compose service name
+      # Add other NEXT_PUBLIC_ variables needed by the frontend
+    volumes:
+      - ./frontend:/app # Mount code for local development
+      - /app/node_modules
+      - /app/.next # Persist .next folder if desired, or let it rebuild
+    restart: unless-stopped
+    # command: ["dumb-init", "bun", "run", "dev"] # If you want to run dev server, Dockerfile CMD is for start
+
+volumes:
+  postgres_data:
+    driver: local 

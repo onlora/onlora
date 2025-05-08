@@ -30,16 +30,16 @@ export const JamToolbar: React.FC<JamToolbarProps> = ({
     <div className="p-2 px-4 border-b bg-card flex justify-between items-center">
       {/* Left side controls (e.g., Hot Vibes) */}
       <div>
-        {/* Placeholder for Hot Vibes - Link or Action TBD */}
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Hot Vibes"
-          disabled
-          title="Hot Vibes (Coming Soon)"
-        >
-          <Flame className="h-5 w-5" />
-        </Button>
+        <Link href="/?tab=trending" passHref legacyBehavior>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Hot Vibes"
+            title="Hot Vibes Feed"
+          >
+            <Flame className="h-5 w-5" />
+          </Button>
+        </Link>
       </div>
 
       {/* Center controls (e.g., Size) */}

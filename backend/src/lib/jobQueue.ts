@@ -18,91 +18,80 @@ const logger = pino({
     process.env.NODE_ENV !== 'production'
       ? { target: 'pino-pretty' }
       : undefined,
-  name: 'pg-boss-job-queue', // More descriptive logger name
+  name: 'pg-boss-job-queue',
 })
 
 const connectionString = process.env.DATABASE_URL
 if (!connectionString) {
   logger.error(
-    'DATABASE_URL environment variable is not set. Job queue cannot start.',
+    'DATABASE_URL environment variable is not set. Job queue cannot operate.',
   )
-  // Consider if to throw error or let app start without job queue
 }
 
 const bossConstructorOptions: ConstructorOptions = {
   connectionString,
-  max: 10, // Max pool connections for pg-boss
-  application_name: 'onlora-worker',
+  max: 10,
+  application_name: 'onlora-pgboss', // Changed application_name for clarity
 }
 
-const jobQueue = connectionString ? new PgBoss(bossConstructorOptions) : null
+const jobQueueInstance = connectionString
+  ? new PgBoss(bossConstructorOptions)
+  : null
 
-// General error handler for pg-boss
-if (jobQueue) {
-jobQueue.on('error', (error: unknown) => {
-  if (error instanceof Error) {
-    logger.error(
+if (jobQueueInstance) {
+  jobQueueInstance.on('error', (error: unknown) => {
+    if (error instanceof Error) {
+      logger.error(
         {
           err: { message: error.message, stack: error.stack, name: error.name },
         },
-      'Job queue encountered an error',
-    )
-  } else {
-    logger.error(
-      { errorObject: error },
-      'Job queue encountered an unknown error object',
-    )
-  }
-})
+        'Job queue encountered an error',
+      )
+    } else {
+      logger.error(
+        { errorObject: error },
+        'Job queue encountered an unknown error object',
+      )
+    }
+  })
 }
 
-// Commenting out specific error event handlers for now to resolve typing issues
-// jobQueue.on('monitor-states.error', (payload: any) => {
-//   logger.error({ eventPayload: payload }, 'Job queue monitor-states error')
-// })
-// jobQueue.on('maintenance.error', (payload: any) => {
-//   logger.error({ eventPayload: payload }, 'Job queue maintenance error')
-// })
-// jobQueue.on('wip.error', (payload: any) => {
-//   logger.error({ eventPayload: payload }, 'Job queue wip error')
-// })
-
-export const startJobQueue = async () => {
-  if (!jobQueue) {
-    logger.warn('Job queue is not starting because DATABASE_URL is not set.')
-    return null
+/**
+ * Starts the pg-boss instance and registers all workers and cron jobs.
+ * This should be called by the dedicated worker process.
+ */
+export const startAndRegisterWorkers = async () => {
+  if (!jobQueueInstance) {
+    logger.warn(
+      'Job queue (pg-boss) is not starting because DATABASE_URL is not set.',
+    )
+    return
   }
 
   try {
-    logger.info('Starting job queue (pg-boss)...')
-    await jobQueue.start()
-    logger.info('Job queue (pg-boss) started successfully.')
+    logger.info('Starting job queue (pg-boss) for worker process...')
+    await jobQueueInstance.start() // Idempotent, ensures DB schema and connection
+    logger.info('Job queue (pg-boss) started successfully for worker.')
 
     // --- Register Workers ---
-    // Concurrency is typically managed by the number of worker processes
-    // or specific pg-boss settings not directly in WorkOptions here.
-    // For now, using default concurrency for a single work registration.
     const genTaskWorkOptions: WorkOptions = {}
-    await jobQueue.work(
+    await jobQueueInstance.work(
       GEN_TASK_QUEUE_NAME,
-      genTaskWorkOptions, // Pass empty or valid WorkOptions
+      genTaskWorkOptions,
       handleGenerateImageTask,
     )
-    logger.info(
-      `Worker registered for queue: ${GEN_TASK_QUEUE_NAME} with default concurrency`,
-    )
+    logger.info(`Worker registered for queue: ${GEN_TASK_QUEUE_NAME}`)
 
-    // Register worker for refresh-hot queue (even if only used by cron)
-    await jobQueue.work(REFRESH_HOT_QUEUE_NAME, {}, handleRefreshHotPosts) // Empty options object
+    await jobQueueInstance.work(
+      REFRESH_HOT_QUEUE_NAME,
+      {},
+      handleRefreshHotPosts,
+    )
     logger.info(`Worker registered for queue: ${REFRESH_HOT_QUEUE_NAME}`)
 
     // --- Schedule Cron Jobs ---
-    // For cron, pg-boss directly triggers .work on the named queue if the job name for schedule matches the queue name.
-    // We will schedule REFRESH_HOT_QUEUE_NAME directly.
-
-    // Attempt to unschedule first to prevent duplicates if re-running startJobQueue
     try {
-      await jobQueue.unschedule(REFRESH_HOT_QUEUE_NAME) // Unschedule by queue name
+      await jobQueueInstance.unschedule(REFRESH_HOT_QUEUE_NAME)
       logger.info(
         `Unscheduled existing cron job (if any) for queue: ${REFRESH_HOT_QUEUE_NAME}`,
       )
@@ -113,28 +102,50 @@ export const startJobQueue = async () => {
       )
     }
 
-    // Schedule the REFRESH_HOT_QUEUE_NAME directly
-    await jobQueue.schedule(
-      REFRESH_HOT_QUEUE_NAME, // Schedule the queue itself
+    await jobQueueInstance.schedule(
+      REFRESH_HOT_QUEUE_NAME,
       REFRESH_HOT_CRON_SCHEDULE,
-      undefined, // Data payload is undefined
-      { tz: 'Etc/UTC', singletonKey: REFRESH_HOT_QUEUE_NAME }, // Use queue name as singletonKey for uniqueness
+      undefined,
+      { tz: 'Etc/UTC', singletonKey: REFRESH_HOT_QUEUE_NAME },
     )
-
-    // With pg-boss v10, scheduling a queue name directly ensures the worker for that queue is triggered.
-    // The schedule function might not always return a new job ID if the schedule already exists and matches the singletonKey.
-    // We rely on pg-boss to manage the schedule idempotently.
     logger.info(
-      `Cron job for queue: ${REFRESH_HOT_QUEUE_NAME} scheduled with cron: ${REFRESH_HOT_CRON_SCHEDULE} (UTC). pg-boss will manage it based on singletonKey.`,
+      `Cron job for queue: ${REFRESH_HOT_QUEUE_NAME} scheduled with cron: ${REFRESH_HOT_CRON_SCHEDULE} (UTC).`,
     )
-
-    return jobQueue
   } catch (error: unknown) {
     const errToLog = error instanceof Error ? error : new Error(String(error))
-    logger.error({ err: errToLog }, 'Failed to start job queue (pg-boss)')
-    throw errToLog // Re-throw to be caught by the main app startup
+    logger.error(
+      { err: errToLog },
+      'Failed to start and register workers (pg-boss)',
+    )
+    throw errToLog // Re-throw to allow worker process to potentially exit or handle
   }
 }
 
-// Export the jobQueue instance directly for publishing jobs
-export default jobQueue
+/**
+ * Initializes and starts the pg-boss instance for the API server (for sending jobs).
+ * Does not register workers or cron jobs.
+ */
+export const initializeBossForApi = async () => {
+  if (!jobQueueInstance) {
+    logger.warn(
+      'Job queue (pg-boss) instance not created due to missing DATABASE_URL.',
+    )
+    return
+  }
+  try {
+    logger.info('Initializing pg-boss for API server (idempotent start)...')
+    await jobQueueInstance.start() // Ensures schema is set up, connects.
+    logger.info('pg-boss initialized successfully for API server.')
+  } catch (error) {
+    const errToLog = error instanceof Error ? error : new Error(String(error))
+    logger.error(
+      { err: errToLog },
+      'Failed to initialize pg-boss for API server.',
+    )
+    // Depending on policy, might want to throw or let API start without job sending capabilities
+    throw errToLog
+  }
+}
+
+// Export the jobQueue instance directly for publishing/sending jobs
+export default jobQueueInstance

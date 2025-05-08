@@ -199,7 +199,7 @@ postRoutes.post(
         }))
         await tx.insert(postImages).values(postImageEntries)
 
-        // 3. Handle VE grant for public post
+        // 3. Handle VE grant for public post AND update image visibility
         if (payload.visibility === 'public') {
           const veGrantPublic = 2
           await tx
@@ -213,6 +213,14 @@ postRoutes.post(
             reason: 'publish_public_post', // Standardized reason
             refId: postId,
           })
+
+          // Also set images to public
+          if (payload.imageIds.length > 0) {
+            await tx
+              .update(images)
+              .set({ isPublic: true })
+              .where(sql`${images.id} IN ${payload.imageIds}`)
+          }
         }
 
         // 4. Handle Remix-specific updates (if parentPostId is provided AND the new post is public)
@@ -652,7 +660,7 @@ postRoutes.patch(
     try {
       const postToUpdate = await db.query.posts.findFirst({
         where: eq(posts.id, postId),
-        columns: { id: true, authorId: true },
+        columns: { id: true, authorId: true, visibility: true },
       })
 
       if (!postToUpdate) {
@@ -685,25 +693,43 @@ postRoutes.patch(
       if (Object.keys(updateData).length > 0) {
         updateData.updatedAt = new Date()
       }
-      // If Object.keys(updateData) is 0 here (excluding potential updatedAt),
-      // it means only undefined optional fields were passed, which is fine,
-      // but the DB update call might be a no-op or an error if empty set is disallowed.
-      // However, the top-level check for empty updatePayload should prevent this.
 
-      const [updatedPost] = await db
+      // Store the original visibility before update for comparison later
+      const originalVisibility = postToUpdate.visibility
+
+      const [updatedPostResult] = await db
         .update(posts)
         .set(updateData)
         .where(eq(posts.id, postId))
         .returning() // Return all fields of the updated post
 
-      if (!updatedPost) {
+      if (!updatedPostResult) {
         // Should not happen if ownership check passed and post existed
         throw new HTTPException(500, {
           message: 'Failed to update post after verification.',
         })
       }
 
-      return c.json(updatedPost)
+      // If visibility was part of the payload and it actually changed
+      if (
+        updatePayload.visibility &&
+        updatedPostResult.visibility !== originalVisibility
+      ) {
+        const associatedPostImages = await db.query.postImages.findMany({
+          where: eq(postImages.postId, postId),
+          columns: { imageId: true },
+        })
+        const imageIdsToUpdate = associatedPostImages.map((pi) => pi.imageId)
+
+        if (imageIdsToUpdate.length > 0) {
+          await db
+            .update(images)
+            .set({ isPublic: updatedPostResult.visibility === 'public' })
+            .where(sql`${images.id} IN ${imageIdsToUpdate}`)
+        }
+      }
+
+      return c.json(updatedPostResult) // Use the result from the update operation
     } catch (error) {
       if (error instanceof HTTPException) throw error
       console.error(`Error updating post ${postId} by user ${userId}:`, error)

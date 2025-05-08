@@ -11,7 +11,7 @@ import { type SSEStreamingApi, streamSSE } from 'hono/streaming'
 import pino from 'pino'
 import { z } from 'zod'
 import { auth } from './lib/auth'
-import { startJobQueue } from './lib/jobQueue.js'
+import { initializeBossForApi } from './lib/jobQueue.js'
 import {
   type AuthenticatedContextEnv,
   requireAuthMiddleware,
@@ -109,92 +109,92 @@ app.get(
   '/api/tasks/:taskId/events',
   requireAuthMiddleware,
   (c: Context<AppEnv>) => {
-  const taskId = c.req.param('taskId')
-  pinoLogger.info(`SSE connection opened for task: ${taskId}`)
-  return streamSSE(
-    c,
-    async (stream: SSEStreamingApi) => {
-      let isConnected = true
-      const notifier: TaskProgressNotifier = {
-        emit: (event, data) => {
-          if (isConnected) {
-            try {
-              const dataString =
-                typeof data === 'string' ? data : JSON.stringify(data)
-              stream.writeSSE({
-                event,
-                data: dataString,
+    const taskId = c.req.param('taskId')
+    pinoLogger.info(`SSE connection opened for task: ${taskId}`)
+    return streamSSE(
+      c,
+      async (stream: SSEStreamingApi) => {
+        let isConnected = true
+        const notifier: TaskProgressNotifier = {
+          emit: (event, data) => {
+            if (isConnected) {
+              try {
+                const dataString =
+                  typeof data === 'string' ? data : JSON.stringify(data)
+                stream.writeSSE({
+                  event,
+                  data: dataString,
                   id: `${Date.now()}-${Math.random()}`,
-              })
-            } catch (e) {
-              pinoLogger.error(
-                { taskId, event, data, err: e },
-                'Failed to stringify or write SSE data',
-              )
+                })
+              } catch (e) {
+                pinoLogger.error(
+                  { taskId, event, data, err: e },
+                  'Failed to stringify or write SSE data',
+                )
+              }
             }
-          }
-        },
-        connClosed: false,
-      }
-      sseConnections.set(taskId, notifier)
-      pinoLogger.debug(
-        `Notifier set for task ${taskId}. Total connections: ${sseConnections.size}`,
-      )
+          },
+          connClosed: false,
+        }
+        sseConnections.set(taskId, notifier)
+        pinoLogger.debug(
+          `Notifier set for task ${taskId}. Total connections: ${sseConnections.size}`,
+        )
 
-      const progressListener = (data: unknown) => {
-        pinoLogger.debug(`Received progress for task ${taskId}`, { data })
-        notifier.emit('progress', data)
-      }
-      progressEmitter.on(`progress-${taskId}`, progressListener)
+        const progressListener = (data: unknown) => {
+          pinoLogger.debug(`Received progress for task ${taskId}`, { data })
+          notifier.emit('progress', data)
+        }
+        progressEmitter.on(`progress-${taskId}`, progressListener)
 
-      const completionListener = (data: unknown) => {
-        pinoLogger.info(`Task ${taskId} completed`, { data })
-        notifier.emit('complete', data)
+        const completionListener = (data: unknown) => {
+          pinoLogger.info(`Task ${taskId} completed`, { data })
+          notifier.emit('complete', data)
           isConnected = false
-      }
-      progressEmitter.on(`complete-${taskId}`, completionListener)
+        }
+        progressEmitter.on(`complete-${taskId}`, completionListener)
 
-      const errorListener = (data: unknown) => {
-        pinoLogger.error(`Task ${taskId} failed`, { data })
-        notifier.emit('error', data)
+        const errorListener = (data: unknown) => {
+          pinoLogger.error(`Task ${taskId} failed`, { data })
+          notifier.emit('error', data)
           isConnected = false
-      }
-      progressEmitter.on(`error-${taskId}`, errorListener)
+        }
+        progressEmitter.on(`error-${taskId}`, errorListener)
 
-      while (isConnected) {
+        while (isConnected) {
           await stream.writeSSE({
             event: 'ping',
             data: new Date().toISOString(),
           })
           await delay(20000)
-        if (notifier.connClosed) {
-          isConnected = false
+          if (notifier.connClosed) {
+            isConnected = false
+          }
         }
-      }
 
-      pinoLogger.info(`SSE stream closing naturally for task: ${taskId}`)
-      progressEmitter.off(`progress-${taskId}`, progressListener)
-      progressEmitter.off(`complete-${taskId}`, completionListener)
-      progressEmitter.off(`error-${taskId}`, errorListener)
-      sseConnections.delete(taskId)
-      pinoLogger.debug(
-        `Notifier removed for task ${taskId}. Total connections: ${sseConnections.size}`,
-      )
-    },
+        pinoLogger.info(`SSE stream closing naturally for task: ${taskId}`)
+        progressEmitter.off(`progress-${taskId}`, progressListener)
+        progressEmitter.off(`complete-${taskId}`, completionListener)
+        progressEmitter.off(`error-${taskId}`, errorListener)
+        sseConnections.delete(taskId)
+        pinoLogger.debug(
+          `Notifier removed for task ${taskId}. Total connections: ${sseConnections.size}`,
+        )
+      },
       async (err: Error) => {
         const taskId = c.req.param('taskId')
-      pinoLogger.warn(
-        { err: err.message, taskId },
-        'SSE stream error or client disconnected',
-      )
-      const notifier = sseConnections.get(taskId)
-      if (notifier) {
+        pinoLogger.warn(
+          { err: err.message, taskId },
+          'SSE stream error or client disconnected',
+        )
+        const notifier = sseConnections.get(taskId)
+        if (notifier) {
           notifier.connClosed = true
-      }
+        }
       },
     )
-    },
-  )
+  },
+)
 
 // Global Error Handler
 app.onError((err, c) => {
@@ -238,15 +238,18 @@ dotenv.config()
 
 const startServer = async () => {
   try {
-    await startJobQueue()
+    await initializeBossForApi()
   } catch (error: unknown) {
     const errToLog = error instanceof Error ? error : new Error(String(error))
-    pinoLogger.error({ err: errToLog }, 'Failed to start job queue')
+    pinoLogger.error(
+      { err: errToLog },
+      'Failed to initialize job queue for API',
+    )
   }
   const port = Number(process.env.PORT) || 8080
   if (process.env.NODE_ENV !== 'test') {
     serve({ fetch: app.fetch, port: port }, (info) => {
-        pinoLogger.info(`🚀 Server listening on http://localhost:${info.port}`)
+      pinoLogger.info(`🚀 Server listening on http://localhost:${info.port}`)
     })
   }
 }
