@@ -5,6 +5,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { db } from '../db' // Adjust path as needed
 import {
+  bookmarks,
   images,
   likes,
   postImages,
@@ -111,6 +112,7 @@ interface PostQueryResult {
       name: string | null
     } | null
   } | null
+  bookmarkCount: number | null
 }
 
 // --- Helper Type for Comment Query Result ---
@@ -339,6 +341,25 @@ postRoutes.get(
             },
           },
         },
+        // Include bookmarkCount in the columns fetched
+        columns: {
+          id: true,
+          title: true,
+          bodyMd: true,
+          tags: true,
+          visibility: true,
+          coverImg: true,
+          authorId: true,
+          createdAt: true,
+          likeCount: true,
+          commentCount: true,
+          remixCount: true,
+          viewCount: true,
+          parentPostId: true,
+          rootPostId: true,
+          generation: true,
+          bookmarkCount: true, // Fetch bookmarkCount
+        },
       })) as PostQueryResult | undefined
 
       if (!postData) {
@@ -356,18 +377,31 @@ postRoutes.get(
       }
 
       let isLikedByCurrentUser = false
+      let isBookmarkedByCurrentUser = false
+
       if (user?.id) {
         const likeRecord = await db.query.likes.findFirst({
           where: and(eq(likes.postId, postId), eq(likes.userId, user.id)),
           columns: { userId: true },
         })
         isLikedByCurrentUser = !!likeRecord
+
+        // Check for bookmark
+        const bookmarkRecord = await db.query.bookmarks.findFirst({
+          where: and(
+            eq(bookmarks.postId, postId),
+            eq(bookmarks.userId, user.id),
+          ),
+          columns: { userId: true }, // Select any column
+        })
+        isBookmarkedByCurrentUser = !!bookmarkRecord
       }
 
       const responseData = {
         ...postData,
         images: postData.postImages.map((pi) => pi.image).filter(Boolean),
         isLiked: isLikedByCurrentUser,
+        isBookmarked: isBookmarkedByCurrentUser,
       }
 
       return c.json(responseData, 200)
@@ -784,6 +818,95 @@ postRoutes.delete(
       if (error instanceof HTTPException) throw error
       console.error(`Error deleting post ${postId} by user ${userId}:`, error)
       throw new HTTPException(500, { message: 'Failed to delete post' })
+    }
+  },
+)
+
+// POST /api/posts/:postId/bookmark - Bookmark or unbookmark a post
+postRoutes.post(
+  '/:postId/bookmark',
+  requireAuthMiddleware,
+  zValidator('param', postIdParamSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, { message: 'Invalid Post ID format' })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+    const userId = user.id
+    const { postId } = c.req.valid('param')
+
+    try {
+      const result = await db.transaction(async (tx) => {
+        // Check if post exists
+        const postExists = await tx.query.posts.findFirst({
+          where: eq(posts.id, postId),
+          columns: { id: true },
+        })
+        if (!postExists) {
+          throw new HTTPException(404, { message: 'Post not found' })
+        }
+
+        // Check if already bookmarked
+        const existingBookmark = await tx.query.bookmarks.findFirst({
+          where: and(
+            eq(bookmarks.postId, postId),
+            eq(bookmarks.userId, userId),
+          ),
+        })
+
+        let didBookmark: boolean
+        let newBookmarkCount: number | null = null
+
+        if (existingBookmark) {
+          // Unbookmark
+          await tx
+            .delete(bookmarks)
+            .where(
+              and(eq(bookmarks.postId, postId), eq(bookmarks.userId, userId)),
+            )
+          const updateResult = await tx
+            .update(posts)
+            .set({
+              bookmarkCount: sql`GREATEST(0, ${posts.bookmarkCount} - 1)`,
+            })
+            .where(eq(posts.id, postId))
+            .returning({ bookmarkCount: posts.bookmarkCount })
+          newBookmarkCount = updateResult[0]?.bookmarkCount ?? null
+          didBookmark = false
+          console.log(`User ${userId} unbookmarked post ${postId}`)
+        } else {
+          // Bookmark
+          await tx.insert(bookmarks).values({ postId: postId, userId: userId })
+          const updateResult = await tx
+            .update(posts)
+            .set({ bookmarkCount: sql`${posts.bookmarkCount} + 1` })
+            .where(eq(posts.id, postId))
+            .returning({ bookmarkCount: posts.bookmarkCount })
+          newBookmarkCount = updateResult[0]?.bookmarkCount ?? null
+          didBookmark = true
+          console.log(`User ${userId} bookmarked post ${postId}`)
+        }
+        const finalBookmarkCount =
+          newBookmarkCount === null ? 0 : newBookmarkCount
+
+        return { didBookmark, bookmarkCount: finalBookmarkCount }
+      })
+      return c.json(result, 200)
+    } catch (error) {
+      if (error instanceof HTTPException) {
+        throw error
+      }
+      console.error(
+        `Error bookmarking/unbookmarking post ${postId} for user ${userId}:`,
+        error,
+      )
+      throw new HTTPException(500, {
+        message: 'Failed to update bookmark status',
+      })
     }
   },
 )

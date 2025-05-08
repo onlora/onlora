@@ -1,6 +1,7 @@
 'use client'
 
 import type { MessageImage } from '@/lib/api/jamApi'
+import { useSession } from '@/lib/authClient'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNowStrict } from 'date-fns'
 import {
@@ -16,7 +17,7 @@ import {
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
@@ -46,8 +47,10 @@ import {
 } from '@/lib/api/commentApi'
 import {
   type PostDetails,
+  type ToggleBookmarkResponse,
   type ToggleLikeResponse,
   getPostDetails,
+  toggleBookmarkPost,
   toggleLikePost,
 } from '@/lib/api/postApi'
 
@@ -77,11 +80,17 @@ export default function PostDetailPage() {
     postIdString = params.postId
   }
 
-  const [currentUser, setCurrentUser] = useState<{
-    id: string
-    name: string | null
-    image: string | null
-  } | null>(null)
+  const { data: session } = useSession()
+
+  const currentUser = useMemo(() => {
+    if (!session?.user) return null
+    return {
+      id: session.user.id,
+      name: session.user.name,
+      image: session.user.image ?? null,
+      username: null,
+    }
+  }, [session])
 
   // Lightbox state
   const [lightboxOpen, setLightboxOpen] = useState(false)
@@ -89,16 +98,6 @@ export default function PostDetailPage() {
     null,
   )
   const commentInputRef = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    setTimeout(() => {
-      setCurrentUser({
-        id: 'clxkarzq7000008l3gq5f4z8y', // Example User ID
-        name: 'Demo User',
-        image: 'https://avatar.vercel.sh/demo-user.png',
-      })
-    }, 500)
-  }, [])
 
   const {
     data: post,
@@ -225,16 +224,68 @@ export default function PostDetailPage() {
     },
   })
 
+  const bookmarkMutation = useMutation<
+    ToggleBookmarkResponse,
+    Error,
+    void,
+    { previousPost?: PostDetails }
+  >({
+    mutationFn: () => {
+      if (!postIdString)
+        throw new Error('Post ID is missing for toggleBookmarkPost')
+      return toggleBookmarkPost(postIdString)
+    },
+    onMutate: async () => {
+      if (!postIdString) return
+      await queryClient.cancelQueries({ queryKey: ['post', postIdString] })
+      const previousPost = queryClient.getQueryData<PostDetails>([
+        'post',
+        postIdString,
+      ])
+
+      if (previousPost) {
+        const newIsBookmarked = !(previousPost.isBookmarked ?? false)
+        const currentBookmarkCount = previousPost.bookmarkCount ?? 0
+        const newBookmarkCount = newIsBookmarked
+          ? currentBookmarkCount + 1
+          : Math.max(0, currentBookmarkCount - 1)
+
+        queryClient.setQueryData<PostDetails>(['post', postIdString], {
+          ...previousPost,
+          isBookmarked: newIsBookmarked,
+          bookmarkCount: newBookmarkCount,
+        })
+      }
+      return { previousPost }
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['myBookmarks'] })
+      toast.success(data.didBookmark ? 'Post bookmarked!' : 'Bookmark removed!')
+    },
+    onError: (err, _newBookmarkState, context) => {
+      if (context?.previousPost && postIdString) {
+        queryClient.setQueryData<PostDetails>(
+          ['post', postIdString],
+          context.previousPost,
+        )
+      }
+      toast.error('Failed to update bookmark status. Please try again.')
+      console.error('Bookmark mutation error:', err)
+    },
+    onSettled: () => {
+      if (postIdString) {
+        queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
+      }
+    },
+  })
+
   const createCommentMutation = useMutation<
     CommentWithAuthor,
     Error,
     { body: string; parentId?: number | undefined },
     { previousComments?: CommentWithAuthor[]; optimisticCommentId?: number }
   >({
-    mutationFn: async ({
-      body,
-      parentId,
-    }: { body: string; parentId?: number | undefined }) => {
+    mutationFn: async ({ body, parentId }) => {
       if (!post || !post.id) throw new Error('Post not loaded')
       const payload: CreateCommentPayload = { postId: Number(post.id), body }
       if (parentId !== undefined) {
@@ -264,6 +315,7 @@ export default function PostDetailPage() {
           id: currentUser.id,
           name: currentUser.name,
           image: currentUser.image,
+          username: currentUser.username,
         },
       }
 
@@ -380,10 +432,6 @@ export default function PostDetailPage() {
         console.error('Failed to copy link: ', err)
         toast.error('Failed to copy link.')
       })
-  }
-
-  const handleBookmarkClick = () => {
-    toast.info('Bookmark feature coming soon!')
   }
 
   const handleReplyClick = useCallback(
@@ -625,9 +673,17 @@ export default function PostDetailPage() {
           variant="ghost"
           size="icon"
           className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-          onClick={handleBookmarkClick}
+          onClick={() => bookmarkMutation.mutate()}
+          disabled={bookmarkMutation.isPending}
+          title={post.isBookmarked ? 'Remove Bookmark' : 'Bookmark Post'}
         >
-          <Bookmark className="h-5 w-5" />
+          {bookmarkMutation.isPending ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : post.isBookmarked ? (
+            <Bookmark className="h-5 w-5 text-blue-500 fill-blue-500" />
+          ) : (
+            <Bookmark className="h-5 w-5" />
+          )}
         </Button>
         <Button
           variant="ghost"

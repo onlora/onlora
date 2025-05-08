@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
 import {
   Popover,
   PopoverContent,
@@ -37,6 +38,7 @@ import {
   CheckCheck,
   LayoutGrid,
   LogOut,
+  Search,
   User as UserIcon,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -53,6 +55,7 @@ export default function Header() {
   const userId = session?.user?.id
   const router = useRouter()
   const [popoverOpen, setPopoverOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   // --- Notifications Query --- //
   const {
@@ -180,6 +183,14 @@ export default function Header() {
     // If closing popover is desired: setPopoverOpen(false)
   }
 
+  const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (searchQuery.trim()) {
+      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`)
+      setSearchQuery('') // Clear input after search
+    }
+  }
+
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-14 max-w-screen-2xl items-center">
@@ -187,6 +198,22 @@ export default function Header() {
           <span className="font-bold sm:inline-block">onlora</span>
         </Link>
         <nav className="flex flex-1 items-center space-x-6 text-sm font-medium" />
+
+        <div className="flex-1 flex justify-center px-4">
+          <form
+            onSubmit={handleSearchSubmit}
+            className="w-full max-w-sm relative"
+          >
+            <Input
+              type="search"
+              placeholder="Search Vibes and Users..."
+              className="pl-10"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+          </form>
+        </div>
 
         <div className="flex flex-1 items-center justify-end space-x-4">
           {isSessionPending ? (

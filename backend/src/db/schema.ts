@@ -92,6 +92,7 @@ export const posts = pgTable('posts', {
   commentCount: integer('comment_count').default(0).notNull(),
   remixCount: integer('remix_count').default(0).notNull(),
   viewCount: integer('view_count').default(0).notNull(),
+  bookmarkCount: integer('bookmark_count').default(0).notNull(),
   parentPostId: integer('parent_post_id').references(
     (): AnyPgColumn => posts.id,
     { onDelete: 'cascade' },
@@ -120,6 +121,7 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
   likes: many(likes),
   comments: many(comments),
   postImages: many(postImages),
+  bookmarks: many(bookmarks),
 }))
 
 export const likes = pgTable(
@@ -211,6 +213,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   comments: many(comments),
   jams: many(jams),
   veTxns: many(veTxns),
+  bookmarks: many(bookmarks),
 }))
 
 export const jamsRelations = relations(jams, ({ one, many }) => ({
@@ -346,4 +349,34 @@ export const jamSessionsRelations = relations(jamSessions, ({ one, many }) => ({
     references: [users.id],
   }),
   messages: many(messages),
+}))
+
+// --- Bookmarks Table ---
+export const bookmarks = pgTable(
+  'bookmarks',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    postId: integer('post_id') // Changed to integer to match posts.id
+      .notNull()
+      .references(() => posts.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.userId, table.postId] }),
+    }
+  },
+)
+
+export const bookmarksRelations = relations(bookmarks, ({ one }) => ({
+  user: one(users, {
+    fields: [bookmarks.userId],
+    references: [users.id],
+  }),
+  post: one(posts, {
+    fields: [bookmarks.postId],
+    references: [posts.id],
+  }),
 }))

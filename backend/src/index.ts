@@ -20,6 +20,7 @@ import commentRoutes from './routes/commentRoutes'
 import feedRoutes from './routes/feedRoutes'
 import jamRoutes from './routes/jamRoutes'
 import postRoutes from './routes/postRoutes'
+import searchRoutes from './routes/searchRoutes'
 import userRoutes from './routes/userRoutes'
 
 interface AppEnv extends AuthenticatedContextEnv {}
@@ -68,6 +69,7 @@ app.route('/api/posts', postRoutes)
 app.route('/api/comments', commentRoutes)
 app.route('/api/feed', feedRoutes)
 app.route('/api/users', userRoutes)
+app.route('/api/search', searchRoutes)
 
 // SSE Infrastructure
 interface TaskProgressNotifier {

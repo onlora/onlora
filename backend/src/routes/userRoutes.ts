@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { db } from '../db'
 import { users } from '../db/auth-schema'
 import {
+  bookmarks,
   follows,
   likes,
   notifications,
@@ -1101,6 +1102,183 @@ userRoutes.get(
     } catch (error) {
       console.error(`Error fetching posts for user ${userId}:`, error)
       throw new HTTPException(500, { message: 'Failed to fetch user posts' })
+    }
+  },
+)
+
+// Zod schema for VE transaction response item (adjust fields as needed)
+const VeTransactionItemSchema = z.object({
+  id: z.number(),
+  userId: z.string(),
+  delta: z.number().int(),
+  reason: z.string().nullable(),
+  refId: z.number().int().positive().nullable(),
+  createdAt: z.string(), // ISO string
+})
+
+// Zod schema for the paginated response
+const PaginatedVeTransactionsSchema = z.object({
+  items: z.array(VeTransactionItemSchema),
+  pageInfo: z.object({
+    hasNextPage: z.boolean(),
+    nextOffset: z.number().nullable(),
+  }),
+})
+
+// GET /api/users/me/ve-transactions - Fetch VE transaction history for the current user
+userRoutes.get(
+  '/me/ve-transactions',
+  requireAuthMiddleware,
+  zValidator('query', paginationQuerySchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid pagination parameters',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      // Should not happen due to middleware, but belts and suspenders
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+    const userId = user.id
+    const { limit, offset } = c.req.valid('query')
+
+    try {
+      // Fetch transactions for the user, ordered by most recent
+      const transactions = await db.query.veTxns.findMany({
+        where: eq(veTxns.userId, userId),
+        orderBy: [desc(veTxns.createdAt)],
+        limit: limit + 1, // Fetch one extra to determine if there is a next page
+        offset: offset,
+        // Optionally join with posts/comments based on refId/reason if needed for context
+      })
+
+      const hasNextPage = transactions.length > limit
+      const itemsToReturn = hasNextPage
+        ? transactions.slice(0, limit)
+        : transactions
+      const nextOffset = hasNextPage ? offset + limit : null
+
+      // Map to expected format (ensure date is ISO string)
+      const responseItems = itemsToReturn.map((txn) => ({
+        ...txn,
+        createdAt: txn.createdAt?.toISOString() ?? new Date(0).toISOString(), // Ensure valid date string
+      }))
+
+      // Validate response shape (optional but good practice)
+      const responseData = PaginatedVeTransactionsSchema.parse({
+        items: responseItems,
+        pageInfo: {
+          hasNextPage,
+          nextOffset,
+        },
+      })
+
+      return c.json(responseData)
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      if (error instanceof z.ZodError) {
+        // Handle potential ZodError from response parsing
+        console.error(
+          `Zod validation error for VE history response for user ${userId}:`,
+          error,
+        )
+        throw new HTTPException(500, {
+          message: 'Internal error validating VE history response',
+        })
+      }
+      console.error(`Error fetching VE transactions for user ${userId}:`, error)
+      throw new HTTPException(500, {
+        message: 'Failed to fetch VE transaction history',
+      })
+    }
+  },
+)
+
+// GET /api/users/me/bookmarks - Fetch posts bookmarked by the current user
+userRoutes.get(
+  '/me/bookmarks',
+  requireAuthMiddleware,
+  zValidator('query', paginationQuerySchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid pagination parameters',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+    const userId = user.id
+    const { limit, offset } = c.req.valid('query')
+
+    try {
+      // Find bookmark records for the user, ordered by when they were created
+      const bookmarkRecords = await db.query.bookmarks.findMany({
+        where: eq(bookmarks.userId, userId),
+        orderBy: [desc(bookmarks.createdAt)],
+        limit: limit + 1, // Fetch one extra for pagination check
+        offset: offset,
+        with: {
+          // Join with posts to get post details
+          post: {
+            columns: {
+              id: true,
+              title: true,
+              coverImg: true,
+              likeCount: true,
+              commentCount: true,
+              viewCount: true,
+              remixCount: true,
+              bookmarkCount: true,
+              createdAt: true,
+              // Add any other fields needed for display card
+            },
+            with: {
+              // Also include author info for the post
+              author: {
+                columns: { id: true, username: true, name: true, image: true },
+              },
+            },
+          },
+        },
+      })
+
+      const hasNextPage = bookmarkRecords.length > limit
+      const itemsToReturn = hasNextPage
+        ? bookmarkRecords.slice(0, limit)
+        : bookmarkRecords
+      const nextOffset = hasNextPage ? offset + limit : null
+
+      // Extract the post data from the bookmark records
+      const bookmarkedPosts = itemsToReturn.map((bm) => bm.post).filter(Boolean) // Filter out any null posts (shouldn't happen with innerJoin logic, but safer)
+
+      // TODO: Re-check isLiked / isBookmarked for the user on these specific posts?
+      // The base post object might not have the user-specific flags here.
+      // For simplicity now, return posts as is. Frontend might need separate checks if flags are needed.
+
+      return c.json({
+        items: bookmarkedPosts, // Return the array of post objects
+        pageInfo: {
+          hasNextPage,
+          nextOffset,
+        },
+      })
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(
+        `Error fetching bookmarked posts for user ${userId}:`,
+        error,
+      )
+      throw new HTTPException(500, {
+        message: 'Failed to fetch bookmarked posts',
+      })
     }
   },
 )

@@ -55,13 +55,15 @@ export interface PostDetails {
   likeCount: number | null
   commentCount: number | null
   remixCount: number | null
-  viewCount?: number // viewCount is correctly here
+  viewCount?: number | null // viewCount is correctly here
+  bookmarkCount?: number | null // Added bookmarkCount (optional for safety)
   parentPostId: number | null // ID of the parent post, if this is a remix
   rootPostId: number | null
   generation: number | null
   author: PostAuthor | null // The author object
   images: PostImage[] // Array of images associated with the post
   isLiked?: boolean // Whether the current user has liked this post
+  isBookmarked: boolean // ADDED: Whether the current user has bookmarked this post
   parentPost?: {
     // This is where parentPost should be
     id: number
@@ -105,6 +107,29 @@ export async function toggleLikePost(
     throw new Error('Invalid Post ID provided.')
   }
   return apiClient<ToggleLikeResponse>(`/posts/${postId}/like`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+}
+
+// --- Bookmark Post --- //
+
+// Response type for bookmark toggle
+export interface ToggleBookmarkResponse {
+  didBookmark: boolean
+  bookmarkCount: number | null // Updated count
+}
+
+/**
+ * Toggles the bookmark status for a post.
+ */
+export async function toggleBookmarkPost(
+  postId: string,
+): Promise<ToggleBookmarkResponse> {
+  if (!postId || Number.isNaN(Number(postId))) {
+    throw new Error('Invalid Post ID provided.')
+  }
+  return apiClient<ToggleBookmarkResponse>(`/posts/${postId}/bookmark`, {
     method: 'POST',
     credentials: 'include',
   })

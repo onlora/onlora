@@ -1,4 +1,5 @@
 import { apiClient } from './apiClient'
+import type { PostDetails } from './postApi' // Import PostDetails
 
 // ----- Types for User Profile Data -----
 
@@ -319,5 +320,84 @@ export const markAllNotificationsAsRead = async (): Promise<{
   })
 }
 
-// export async function followUser(targetUserId: string): Promise<{ success: boolean; message: string }> { ... }
-// export async function unfollowUser(targetUserId: string): Promise<{ success: boolean; message: string }> { ... }
+// --- VE Transaction History --- //
+
+// Type for a single VE transaction item
+export interface VeTransactionItem {
+  id: number
+  userId: string
+  delta: number
+  reason: string | null
+  refId: number | null
+  createdAt: string // ISO Date string
+}
+
+// Type for the paginated VE transaction response
+export interface VeHistoryPage {
+  items: VeTransactionItem[]
+  pageInfo: {
+    hasNextPage: boolean
+    nextOffset: number | null
+  }
+}
+
+/**
+ * Fetches the current user's Vibe Energy (VE) transaction history.
+ */
+export async function getMyVeHistory(params: {
+  limit: number
+  offset: number
+}): Promise<VeHistoryPage> {
+  const queryParams = new URLSearchParams({
+    limit: String(params.limit),
+    offset: String(params.offset),
+  })
+  return apiClient<VeHistoryPage>(
+    `/users/me/ve-transactions?${queryParams.toString()}`,
+    {
+      method: 'GET',
+      credentials: 'include', // Required to identify the user
+    },
+  )
+}
+
+// --- Bookmarked Posts --- //
+
+// Assuming the backend returns a structure similar to ProfilePostsPage
+// but containing full post details needed for display cards.
+// If the structure is different, define a new type.
+// For now, re-using ProfilePostsPage but the items might have more fields.
+// Note: The backend actually returns PostDetails[], let's define accordingly.
+
+// Re-import PostDetails if not already imported
+// import { PostDetails } from './postApi';
+// Let's assume PostDetails includes necessary fields like author, etc.
+
+// Define the response structure for bookmarked posts
+export interface BookmarkedPostsPage {
+  items: PostDetails[] // Use the detailed post type
+  pageInfo: {
+    hasNextPage: boolean
+    nextOffset: number | null
+  }
+}
+
+/**
+ * Fetches posts bookmarked by the current user.
+ */
+export async function getMyBookmarkedPosts(params: {
+  limit: number
+  offset: number
+}): Promise<BookmarkedPostsPage> {
+  const queryParams = new URLSearchParams({
+    limit: String(params.limit),
+    offset: String(params.offset),
+  })
+  return apiClient<BookmarkedPostsPage>(
+    `/users/me/bookmarks?${queryParams.toString()}`,
+    {
+      method: 'GET',
+      credentials: 'include', // Required to identify the user
+    },
+  )
+}
