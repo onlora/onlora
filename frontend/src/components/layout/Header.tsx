@@ -179,12 +179,6 @@ export default function Header() {
     }
   }
 
-  const handleNotificationItemClick = () => {
-    // This function can be passed to NotificationItemComponent if we want to close the popover on item click
-    // For now, the component itself handles navigation and marking as read.
-    // If closing popover is desired: setPopoverOpen(false)
-  }
-
   const handleSearchSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (searchQuery.trim()) {
@@ -194,180 +188,173 @@ export default function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container flex h-14 max-w-screen-2xl items-center">
+    <header className="sticky top-0 z-50 w-full bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <div className="container flex h-16 items-center px-6">
         <Link href="/" className="mr-6 flex items-center space-x-2">
-          <span className="font-bold sm:inline-block">onlora</span>
+          <span className="font-bold text-primary text-2xl tracking-tight">
+            onlora
+          </span>
         </Link>
-        <nav className="flex flex-1 items-center space-x-6 text-sm font-medium">
-          <Link
-            href="/feed"
-            className="text-foreground/70 hover:text-foreground transition-colors"
-          >
-            Feed
-          </Link>
-          {/* Add other primary navigation links here if needed */}
-        </nav>
 
-        <div className="flex-1 flex justify-center px-4">
-          <form
-            onSubmit={handleSearchSubmit}
-            className="w-full max-w-sm relative"
-          >
-            <Input
-              type="search"
-              placeholder="Search Vibes and Users..."
-              className="pl-10"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+        <div className="flex-1 flex items-center justify-center max-w-2xl mx-auto">
+          <form onSubmit={handleSearchSubmit} className="w-full">
+            <div className="relative group">
+              <Input
+                type="search"
+                placeholder="Search for inspiration..."
+                className="w-full pl-12 pr-4 py-2 h-11 bg-muted/30 hover:bg-muted/50 focus:bg-muted/50 border-0 rounded-2xl transition-colors"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground group-hover:text-foreground/80 transition-colors" />
+            </div>
           </form>
         </div>
 
-        <div className="flex flex-1 items-center justify-end space-x-4">
+        <div className="flex items-center gap-4 ml-6">
           {isSessionPending ? (
-            <Skeleton className="h-8 w-20" />
+            <Skeleton className="h-9 w-9 rounded-full" />
           ) : user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="relative h-8 w-8 rounded-full"
-                >
-                  <Avatar className="h-8 w-8">
-                    <AvatarImage
-                      src={user.image ?? undefined}
-                      alt={user.name ?? user.email ?? 'User'}
-                    />
-                    <AvatarFallback>{getInitials(user.name)}</AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56" align="end" forceMount>
-                <DropdownMenuLabel className="font-normal">
-                  <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium leading-none">
-                      {user.name}
-                    </p>
-                    <p className="text-xs leading-none text-muted-foreground">
-                      {user.email}
-                    </p>
-                  </div>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link href="/profile">
-                    <UserIcon className="mr-2 h-4 w-4" />
-                    Profile
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/gallery">
-                    <LayoutGrid className="mr-2 h-4 w-4" />
-                    My Gallery
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/profile/bookmarks">
-                    <Bookmark className="mr-2 h-4 w-4" />
-                    Bookmarks
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/profile/ve-history">
-                    <Coins className="mr-2 h-4 w-4" />
-                    VE History
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  Log out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <Button onClick={handleGoogleSignIn} variant="outline" size="sm">
-              Sign In with Google
-            </Button>
-          )}
-
-          {session?.user && (
-            <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative ml-2">
-                  <Bell className="h-5 w-5" />
-                  {unreadCount > 0 && (
-                    <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80 p-0" align="end">
-                <div className="p-4 font-medium border-b flex justify-between items-center">
-                  <span>Notifications</span>
-                  <Link
-                    href="/notifications"
-                    className="text-sm text-primary hover:underline"
-                    onClick={() => setPopoverOpen(false)}
+            <>
+              <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="relative rounded-full hover:bg-muted/50"
                   >
-                    View all
-                  </Link>
-                </div>
-                <div className="max-h-96 overflow-y-auto">
-                  {isLoadingNotifications && (
-                    <div className="p-4 text-sm text-muted-foreground">
-                      Loading...
-                    </div>
-                  )}
-                  {!isLoadingNotifications && allNotifications.length === 0 && (
-                    <div className="p-4 text-sm text-muted-foreground">
-                      No new notifications.
-                    </div>
-                  )}
-                  {allNotifications.map((notification: NotificationItem) => (
-                    <NotificationItemComponent
-                      key={notification.id}
-                      notification={notification}
-                      queryKeyToUpdate="myNotifications"
-                    />
-                  ))}
-                  {hasNextNotificationsPage && (
-                    <div className="p-2 text-center">
+                    <Bell className="h-5 w-5" />
+                    {unreadCount > 0 && (
+                      <span className="absolute top-1 right-1 block h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-background animate-pulse" />
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="end">
+                  <div className="p-4 font-medium border-b flex justify-between items-center">
+                    <span>Notifications</span>
+                    <Link
+                      href="/notifications"
+                      className="text-sm text-primary hover:underline"
+                      onClick={() => setPopoverOpen(false)}
+                    >
+                      View all
+                    </Link>
+                  </div>
+                  <div className="max-h-96 overflow-y-auto">
+                    {isLoadingNotifications && (
+                      <div className="p-4 text-sm text-muted-foreground">
+                        Loading...
+                      </div>
+                    )}
+                    {!isLoadingNotifications &&
+                      allNotifications.length === 0 && (
+                        <div className="p-4 text-sm text-muted-foreground">
+                          No new notifications.
+                        </div>
+                      )}
+                    {allNotifications.map((notification: NotificationItem) => (
+                      <NotificationItemComponent
+                        key={notification.id}
+                        notification={notification}
+                        queryKeyToUpdate="myNotifications"
+                      />
+                    ))}
+                    {hasNextNotificationsPage && (
+                      <div className="p-2 text-center">
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={() => fetchNextNotificationsPage()}
+                          disabled={isFetchingNextNotificationsPage}
+                        >
+                          {isFetchingNextNotificationsPage
+                            ? 'Loading...'
+                            : 'Load More'}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  {allNotifications.length > 0 && (
+                    <div className="p-2 border-t text-center">
                       <Button
-                        variant="link"
+                        variant="ghost"
                         size="sm"
-                        onClick={() => fetchNextNotificationsPage()}
-                        disabled={isFetchingNextNotificationsPage}
+                        className="text-xs text-muted-foreground hover:text-primary disabled:opacity-50 w-full"
+                        onClick={() => {
+                          markAllReadMutation.mutate()
+                        }}
+                        disabled={
+                          unreadCount === 0 || markAllReadMutation.isPending
+                        }
                       >
-                        {isFetchingNextNotificationsPage
-                          ? 'Loading...'
-                          : 'Load More'}
+                        <CheckCheck className="mr-1.5 h-3.5 w-3.5" />
+                        Mark all as read ({unreadCount})
                       </Button>
                     </div>
                   )}
-                </div>
-                {allNotifications.length > 0 && (
-                  <div className="p-2 border-t text-center">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs text-muted-foreground hover:text-primary disabled:opacity-50 w-full"
-                      onClick={() => {
-                        markAllReadMutation.mutate()
-                      }}
-                      disabled={
-                        unreadCount === 0 || markAllReadMutation.isPending
-                      }
-                    >
-                      <CheckCheck className="mr-1.5 h-3.5 w-3.5" />
-                      Mark all as read ({unreadCount})
-                    </Button>
-                  </div>
-                )}
-              </PopoverContent>
-            </Popover>
-          )}
+                </PopoverContent>
+              </Popover>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="relative h-9 w-9 rounded-full hover:bg-muted/50"
+                  >
+                    <Avatar className="h-9 w-9">
+                      <AvatarImage
+                        src={user.image ?? undefined}
+                        alt={user.name ?? user.email ?? 'User'}
+                      />
+                      <AvatarFallback>{getInitials(user.name)}</AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-56" align="end" forceMount>
+                  <DropdownMenuLabel className="font-normal">
+                    <div className="flex flex-col space-y-1">
+                      <p className="text-sm font-medium leading-none">
+                        {user.name}
+                      </p>
+                      <p className="text-xs leading-none text-muted-foreground">
+                        {user.email}
+                      </p>
+                    </div>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href="/profile">
+                      <UserIcon className="mr-2 h-4 w-4" />
+                      Profile
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/gallery">
+                      <LayoutGrid className="mr-2 h-4 w-4" />
+                      My Gallery
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/profile/bookmarks">
+                      <Bookmark className="mr-2 h-4 w-4" />
+                      Bookmarks
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/profile/ve-history">
+                      <Coins className="mr-2 h-4 w-4" />
+                      VE History
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleSignOut}>
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Log out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          ) : null}
         </div>
       </div>
     </header>
