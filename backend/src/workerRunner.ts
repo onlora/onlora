@@ -1,15 +1,11 @@
-import * as dotenv from 'dotenv'
 import pino from 'pino'
+import { config } from './config'
 import { startAndRegisterWorkers } from './lib/jobQueue'
 
-// Load environment variables (especially DATABASE_URL)
-// Ensure path is correct if .env.local is in backend/ root, relative to src/
-dotenv.config({ path: '../.env.local' })
-
 const runnerLogger = pino({
-  level: process.env.LOG_LEVEL || 'info',
+  level: config.logLevel,
   transport:
-    process.env.NODE_ENV !== 'production'
+    config.nodeEnv !== 'production' // Use nodeEnv from centralized config
       ? { target: 'pino-pretty' }
       : undefined,
   name: 'onlora-worker-runner',

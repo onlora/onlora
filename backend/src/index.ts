@@ -1,7 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
-import dotenv from 'dotenv'
 import { type Context, Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
@@ -10,6 +9,7 @@ import { secureHeaders } from 'hono/secure-headers'
 import { type SSEStreamingApi, streamSSE } from 'hono/streaming'
 import pino from 'pino'
 import { z } from 'zod'
+import { config } from './config'
 import { auth } from './lib/auth'
 import { initializeBossForApi } from './lib/jobQueue.js'
 import {
@@ -235,24 +235,18 @@ app.notFound((c) => {
   return c.json({ code: 404, message: 'Not Found' }, 404)
 })
 
-// Load environment variables
-dotenv.config()
-
 const startServer = async () => {
   try {
     await initializeBossForApi()
+    serve({ fetch: app.fetch, port: Number.parseInt(config.port) }, (info) => {
+      pinoLogger.info(`🚀 Server listening on http://localhost:${info.port}`)
+    })
   } catch (error: unknown) {
     const errToLog = error instanceof Error ? error : new Error(String(error))
     pinoLogger.error(
       { err: errToLog },
       'Failed to initialize job queue for API',
     )
-  }
-  const port = Number(process.env.PORT) || 8080
-  if (process.env.NODE_ENV !== 'test') {
-    serve({ fetch: app.fetch, port: port }, (info) => {
-      pinoLogger.info(`🚀 Server listening on http://localhost:${info.port}`)
-    })
   }
 }
 

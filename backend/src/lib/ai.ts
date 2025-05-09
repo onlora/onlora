@@ -10,28 +10,20 @@ import {
   experimental_generateImage as generateImage,
   generateText,
 } from 'ai'
-import * as dotenv from 'dotenv'
 import pino from 'pino'
-
-// Load environment variables
-dotenv.config({ path: '../.env.local' }) // Assuming .env.local is in backend/
+import { config } from '../config'
 
 const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
+  level: config.logLevel,
   transport:
-    process.env.NODE_ENV !== 'production'
-      ? { target: 'pino-pretty' }
-      : undefined,
+    config.nodeEnv !== 'production' ? { target: 'pino-pretty' } : undefined,
   name: 'ai-lib',
 })
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY
-
-if (!OPENAI_API_KEY) {
+if (!config.openaiApiKey) {
   logger.warn('OPENAI_API_KEY not set. OpenAI models will not be available.')
 }
-if (!GOOGLE_API_KEY) {
+if (!config.googleApiKey) {
   logger.warn(
     'GOOGLE_API_KEY not set. Google Gemini models will not be available.',
   )
@@ -88,14 +80,14 @@ export const generateContentWithLLM = async (
 
   switch (modelProvider) {
     case 'openai':
-      if (!OPENAI_API_KEY) {
+      if (!config.openaiApiKey) {
         logger.error('OpenAI API Key not configured for generateText.')
         return null
       }
       model = openai(modelId)
       break
     case 'google':
-      if (!GOOGLE_API_KEY) {
+      if (!config.googleApiKey) {
         logger.error('Google API Key not configured for generateText.')
         return null
       }
@@ -252,8 +244,10 @@ export const generateImageWithDedicatedModel = async (
     return null
   }
 
-  if (!OPENAI_API_KEY) {
-    logger.error('OpenAI API Key not configured for generateImage.')
+  if (!config.openaiApiKey) {
+    logger.error(
+      'OpenAI API Key not configured for generateImage. Cannot generate image.',
+    )
     return null
   }
 

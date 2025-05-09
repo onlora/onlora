@@ -1,5 +1,6 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { config } from '../config'
 import { db } from '../db'
 import {
   accounts as accountsAuthTable,
@@ -9,20 +10,19 @@ import {
 } from '../db/auth-schema'
 import { veTxns } from '../db/schema'
 
-// Check if the required environment variables are set
-if (!process.env.GOOGLE_CLIENT_ID) {
+if (!config.googleClientId) {
   throw new Error('Missing GOOGLE_CLIENT_ID environment variable')
 }
-if (!process.env.GOOGLE_CLIENT_SECRET) {
+if (!config.googleClientSecret) {
   throw new Error('Missing GOOGLE_CLIENT_SECRET environment variable')
 }
-if (!process.env.JWT_SECRET) {
+if (!config.jwtSecret) {
   throw new Error('Missing JWT_SECRET environment variable')
 }
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
-    provider: 'pg', // Specify PostgreSQL
+    provider: 'pg',
     schema: {
       user: usersAuthTable,
       account: accountsAuthTable,
@@ -32,14 +32,14 @@ export const auth = betterAuth({
   }),
   socialProviders: {
     google: {
-      clientId: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      clientId: config.googleClientId,
+      clientSecret: config.googleClientSecret,
     },
     // emailAndPassword: { enabled: true }, // If we want email/password later
   },
   jwt: {
-    secret: process.env.JWT_SECRET,
-    options: { expiresIn: '24h' }, // As per mvp_tech_spec.md (JWT HS256, 24h)
+    secret: config.jwtSecret,
+    options: { expiresIn: '24h' },
   },
   databaseHooks: {
     user: {

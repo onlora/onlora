@@ -1,33 +1,23 @@
 import crypto from 'node:crypto' // For generating unique file names
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import * as dotenv from 'dotenv'
 import pino from 'pino'
-
-dotenv.config({ path: '../.env.local' }) // Assuming .env.local is in backend/, relative to src/lib/
+import { config } from '../config'
 
 const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
+  level: config.logLevel,
   transport:
-    process.env.NODE_ENV !== 'production'
-      ? { target: 'pino-pretty' }
-      : undefined,
+    config.nodeEnv !== 'production' ? { target: 'pino-pretty' } : undefined,
   name: 'r2-helper',
 })
 
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME
-const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY
-const R2_PUBLIC_URL_BASE = process.env.R2_PUBLIC_URL_BASE
-
 let r2Configured = true
 if (
-  !R2_BUCKET_NAME ||
-  !R2_ACCOUNT_ID ||
-  !R2_ACCESS_KEY_ID ||
-  !R2_SECRET_ACCESS_KEY ||
-  !R2_PUBLIC_URL_BASE
+  !config.r2BucketName ||
+  !config.r2AccountId ||
+  !config.r2AccessKeyId ||
+  !config.r2SecretAccessKey ||
+  !config.r2PublicUrlBase
 ) {
   logger.error(
     'R2 environment variables are not fully configured. Pre-signed URL generation will fail. Please check R2_BUCKET_NAME, R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PUBLIC_URL_BASE',
@@ -35,16 +25,16 @@ if (
   r2Configured = false
 }
 
-const R2_ENDPOINT = R2_ACCOUNT_ID
-  ? `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`
+const R2_ENDPOINT = config.r2AccountId
+  ? `https://${config.r2AccountId}.r2.cloudflarestorage.com`
   : ''
 
 const s3Client = new S3Client({
   region: 'auto',
   endpoint: R2_ENDPOINT,
   credentials: {
-    accessKeyId: R2_ACCESS_KEY_ID || '',
-    secretAccessKey: R2_SECRET_ACCESS_KEY || '',
+    accessKeyId: config.r2AccessKeyId || '',
+    secretAccessKey: config.r2SecretAccessKey || '',
   },
 })
 
@@ -60,7 +50,7 @@ export const getUploadPresignedUrl = async (
   prefix = 'uploads/',
   expiresInSeconds = 3600,
 ): Promise<PresignedUrlResult | null> => {
-  if (!r2Configured || !R2_BUCKET_NAME || !R2_PUBLIC_URL_BASE) {
+  if (!r2Configured || !config.r2BucketName || !config.r2PublicUrlBase) {
     logger.error(
       'R2 not configured or essential variables missing. Cannot generate pre-signed URL.',
     )
@@ -73,7 +63,7 @@ export const getUploadPresignedUrl = async (
     const key = `${prefix.replace(/\/$/, '')}/${randomFileName}` // Ensure prefix doesn't end with slash, then add one
 
     const command = new PutObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: config.r2BucketName,
       Key: key,
       ContentType: contentType,
     })
@@ -82,7 +72,7 @@ export const getUploadPresignedUrl = async (
       expiresIn: expiresInSeconds,
     })
 
-    const publicUrl = `${R2_PUBLIC_URL_BASE.replace(/\/$/, '')}/${key}`
+    const publicUrl = `${config.r2PublicUrlBase.replace(/\/$/, '')}/${key}`
 
     logger.info(`Generated pre-signed URL for key: ${key}`)
     return { uploadUrl, publicUrl, key }
@@ -113,7 +103,7 @@ export const uploadBufferToR2 = async (
   desiredFileName?: string,
   keyPrefix = 'general-uploads/',
 ): Promise<UploadResult | null> => {
-  if (!r2Configured || !R2_BUCKET_NAME || !R2_PUBLIC_URL_BASE) {
+  if (!r2Configured || !config.r2BucketName || !config.r2PublicUrlBase) {
     logger.error(
       'R2 not configured or essential variables missing. Cannot upload buffer.',
     )
@@ -133,7 +123,7 @@ export const uploadBufferToR2 = async (
     ) // Ensure no leading/double slashes
 
     const command = new PutObjectCommand({
-      Bucket: R2_BUCKET_NAME,
+      Bucket: config.r2BucketName,
       Key: key,
       Body: buffer,
       ContentType: contentType,
@@ -143,7 +133,7 @@ export const uploadBufferToR2 = async (
     const response = await s3Client.send(command)
 
     // Construct the public URL based on the R2_PUBLIC_URL_BASE and the key
-    const publicUrl = `${R2_PUBLIC_URL_BASE.replace(/\/$/, '')}/${key}`
+    const publicUrl = `${config.r2PublicUrlBase.replace(/\/$/, '')}/${key}`
 
     logger.info(
       { key, publicUrl, eTag: response.ETag },
