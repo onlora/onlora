@@ -43,7 +43,13 @@ app.use(
   ),
 )
 app.use('*', secureHeaders())
-app.use('/api/*', cors())
+app.use(
+  '/api/*',
+  cors({
+    origin: ['http://localhost:3000', 'https://api.onlora.ai'],
+    credentials: true,
+  }),
+)
 
 // Static Files
 app.use('/', serveStatic({ root: './public' }))

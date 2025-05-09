@@ -6,7 +6,7 @@ import {
   accounts as accountsAuthTable,
   sessions as sessionsAuthTable,
   users as usersAuthTable,
-  verifications as verificationsAuthTable,
+  verifications as verificationsTable,
 } from '../db/auth-schema'
 import { veTxns } from '../db/schema'
 
@@ -27,7 +27,7 @@ export const auth = betterAuth({
       user: usersAuthTable,
       account: accountsAuthTable,
       session: sessionsAuthTable,
-      verificationToken: verificationsAuthTable,
+      verification: verificationsTable,
     },
   }),
   socialProviders: {
@@ -41,6 +41,7 @@ export const auth = betterAuth({
     secret: config.jwtSecret,
     options: { expiresIn: '24h' },
   },
+  trustedOrigins: ['http://localhost:3000', 'https://api.onlora.ai'],
   databaseHooks: {
     user: {
       create: {
