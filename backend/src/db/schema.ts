@@ -84,7 +84,7 @@ export const posts = pgTable('posts', {
   bodyMd: text('body_md'), // Markdown body
   tags: text('tags').array(), // Array of strings for tags
   visibility: visibilityEnum('visibility').default('public'),
-  coverImg: text('cover_img_url'), // JS property is coverImg, SQL column is cover_img_url
+  coverImg: text('cover_img'),
   jamSessionId: integer('jam_session_id').references(() => jamSessions.id, {
     onDelete: 'set null',
   }), // Optional link to original jam session

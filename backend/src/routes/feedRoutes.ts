@@ -245,7 +245,7 @@ feedRoutes.get(
     const offset = (page - 1) * pageSize
 
     try {
-      const trendingPostsData = (await db.execute(sql`
+      const result = await db.execute(sql`
         SELECT 
           id,
           author_id,
@@ -262,7 +262,8 @@ feedRoutes.get(
         ORDER BY score DESC, created_at DESC
         LIMIT ${pageSize}
         OFFSET ${offset};
-      `)) as unknown as MvPostHotRow[]
+      `)
+      const trendingPostsData = result.rows as MvPostHotRow[]
 
       const feedPosts: TrendingFeedPost[] = trendingPostsData.map(
         (row: MvPostHotRow) => ({

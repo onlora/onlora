@@ -14,7 +14,7 @@ SELECT
   (COALESCE(p.remix_count, 0) * 2 + COALESCE(p.like_count, 0) + COALESCE(p.comment_count, 0)) AS score,
   p.created_at,
   u.username AS author_username, -- Added for convenience
-  u.avatar_url AS author_avatar_url -- Added for convenience
+  u.image AS author_avatar_url -- Added for convenience
 FROM
   posts p
 LEFT JOIN
