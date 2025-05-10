@@ -169,7 +169,7 @@ export default function HomePage() {
   return (
     <div className="px-4 sm:px-6 py-0 max-w-7xl mx-auto">
       {/* Feed tabs */}
-      <div className="mb-6 overflow-x-auto hide-scrollbar sticky top-0 bg-background/95 backdrop-blur z-10 py-4">
+      <div className="mb-6 overflow-x-auto hide-scrollbar sticky top-0 bg-background/95 backdrop-blur z-10">
         <div className="flex gap-2 min-w-max">
           <button
             type="button"

@@ -196,7 +196,9 @@ export const getMyPosts = async (
   const queryString = queryParams.toString() ? `?${queryParams.toString()}` : ''
 
   // Assumes backend endpoint GET /api/users/me/posts exists and returns ProfilePostsPage structure
-  return apiClient<ProfilePostsPage>(`/users/me/posts${queryString}`)
+  return apiClient<ProfilePostsPage>(`/users/me/posts${queryString}`, {
+    credentials: 'include',
+  })
 }
 
 /**

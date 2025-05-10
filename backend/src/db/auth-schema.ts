@@ -8,7 +8,7 @@ export const users = pgTable('users', {
   image: text('image'),
 
   // Application-specific fields
-  username: text('username').notNull().unique(),
+  username: text('username'),
   bio: text('bio'),
   bannerUrl: text('banner_url'),
   vibe_energy: integer('vibe_energy').notNull().default(50),

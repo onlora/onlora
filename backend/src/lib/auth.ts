@@ -16,10 +16,8 @@ if (!config.googleClientId) {
 if (!config.googleClientSecret) {
   throw new Error('Missing GOOGLE_CLIENT_SECRET environment variable')
 }
-if (!config.jwtSecret) {
-  throw new Error('Missing JWT_SECRET environment variable')
-}
 
+// Define the site URL based on environment
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: 'pg',
@@ -36,10 +34,6 @@ export const auth = betterAuth({
       clientSecret: config.googleClientSecret,
     },
     // emailAndPassword: { enabled: true }, // If we want email/password later
-  },
-  jwt: {
-    secret: config.jwtSecret,
-    options: { expiresIn: '24h' },
   },
   trustedOrigins: ['http://localhost:3000', 'https://api.onlora.ai'],
   databaseHooks: {
@@ -77,6 +71,18 @@ export const auth = betterAuth({
       // We might also need an 'update' hook if user profile data from provider needs mapping to our custom fields
     },
   },
+  advanced: {
+    cookiePrefix: 'onlora',
+    defaultCookieAttributes: {
+      httpOnly: true,
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      domain:
+        process.env.NODE_ENV === 'production' ? '.onlora.ai' : 'localhost',
+      path: '/',
+    },
+  },
+
   // Example of database hooks if needed later for custom logic on user creation:
   // databaseHooks: {
   //   user: {

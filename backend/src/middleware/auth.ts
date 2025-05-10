@@ -23,7 +23,7 @@ export const authMiddleware = async (
     // better-auth's getSession typically uses headers (cookies) from the standard Request object
     const session = await auth.api.getSession({ headers: c.req.raw.headers })
 
-    if (session && session.user) {
+    if (session?.user) {
       c.set('user', session.user)
       c.set('session', session)
       logger.info({ userId: session.user?.id }, 'User authenticated')
@@ -79,7 +79,7 @@ export const optionalAuthMiddleware = async (
   try {
     const session = await auth.api.getSession({ headers: c.req.raw.headers })
 
-    if (session && session.user) {
+    if (session?.user) {
       c.set('user', session.user)
       c.set('session', session)
       logger.info(
