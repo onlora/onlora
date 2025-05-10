@@ -3,6 +3,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:worker": "tsx watch src/workerRunner.ts",
     "build": "tsup src/index.ts --dts --format esm --clean",
     "start": "node dist/index.js",
     "db:generate": "drizzle-kit generate",

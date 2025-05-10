@@ -139,9 +139,26 @@ export interface UpdateUserProfilePayload {
 export const updateUserProfile = async (
   payload: UpdateUserProfilePayload,
 ): Promise<UserProfile> => {
+  // Construct FormData
+  const formData = new FormData()
+  Object.entries(payload).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      if (value instanceof File) {
+        formData.append(key, value)
+      } else if (Array.isArray(value)) {
+        // For arrays like socialLinks, append each item separately or stringify
+        // Adjust based on how your backend expects array data with FormData
+        formData.append(key, JSON.stringify(value)) // Example: stringify array
+      } else {
+        formData.append(key, String(value))
+      }
+    }
+  })
+
   return apiClient<UserProfile>('/users/me/profile', {
-    method: 'PATCH',
-    body: payload as Record<string, unknown>, // Use unknown instead of any
+    method: 'PUT',
+    body: formData, // Use FormData directly
+    credentials: 'include',
   })
 }
 
@@ -159,6 +176,7 @@ export const followUser = async (
 ): Promise<FollowResponse> => {
   return apiClient<FollowResponse>(`/users/${targetUserId}/follow`, {
     method: 'POST',
+    credentials: 'include',
   })
 }
 
@@ -169,7 +187,8 @@ export const unfollowUser = async (
   targetUserId: string,
 ): Promise<FollowResponse> => {
   return apiClient<FollowResponse>(`/users/${targetUserId}/unfollow`, {
-    method: 'POST',
+    method: 'POST', // Typically unfollowing is also a POST or DELETE
+    credentials: 'include',
   })
 }
 
@@ -298,7 +317,7 @@ export const markNotificationAsRead = async (
   return apiClient<{ success: boolean; message: string }>(
     `/users/me/notifications/${notificationId}/read`,
     {
-      method: 'PATCH',
+      method: 'PATCH', // Use PATCH for partial updates like marking as read
       credentials: 'include',
     },
   )
@@ -309,15 +328,15 @@ export const markNotificationAsRead = async (
  */
 export const markAllNotificationsAsRead = async (): Promise<{
   success: boolean
-  message: string
-  updatedCount: number
+  message?: string // Message might be optional on success
+  error?: string // Error message on failure
 }> => {
   return apiClient<{
     success: boolean
-    message: string
-    updatedCount: number
-  }>('/users/me/notifications/read-all', {
-    method: 'PATCH',
+    message?: string
+    error?: string
+  }>('/users/me/notifications/mark-all-as-read', {
+    method: 'POST',
     credentials: 'include',
   })
 }

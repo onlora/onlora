@@ -23,7 +23,9 @@ export interface Message {
  * Fetches messages for a specific Jam session.
  */
 export const getJamMessages = async (jamId: string): Promise<Message[]> => {
-  return apiClient<Message[]>(`/jams/${jamId}/messages`)
+  return apiClient<Message[]>(`/jams/${jamId}/messages`, {
+    credentials: 'include',
+  })
   // Error handling is now managed by apiClient
 }
 
@@ -54,6 +56,7 @@ export const generateImageForJam = async (
   return apiClient<GenerateImageResponse>(`/jams/${jamId}/generate`, {
     method: 'POST',
     body: payload as unknown as Record<string, unknown>, // apiClient handles JSON.stringify for non-FormData
+    credentials: 'include',
   })
   // Error handling and structured error creation are now managed by apiClient
 }
@@ -70,5 +73,8 @@ export interface CreateJamResponse {
  * Creates a new Jam session.
  */
 export const createJam = async (): Promise<CreateJamResponse> => {
-  return apiClient<CreateJamResponse>('/jams', { method: 'POST' })
+  return apiClient<CreateJamResponse>('/jams', {
+    method: 'POST',
+    credentials: 'include',
+  })
 }

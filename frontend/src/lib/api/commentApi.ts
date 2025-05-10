@@ -48,12 +48,12 @@ export async function getComments(
 /**
  * Creates a new comment.
  */
-export async function createComment(
+export const createComment = async (
   payload: CreateCommentPayload,
-): Promise<CommentWithAuthor> {
+): Promise<CommentWithAuthor> => {
   return apiClient<CommentWithAuthor, CreateCommentPayload>('/comments', {
     method: 'POST',
-    credentials: 'include', // Required for posting comments
     body: payload,
+    credentials: 'include',
   })
 }

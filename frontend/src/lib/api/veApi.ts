@@ -16,6 +16,7 @@ export const claimDailyBonus = async (): Promise<DailyBonusClaimResponse> => {
     return await apiClient<DailyBonusClaimResponse>('/ve/daily-check-in', {
       method: 'POST',
       // No body needed for this request
+      credentials: 'include',
     })
   } catch (error) {
     // Handle cases where the error might not be in the expected ApiError format
