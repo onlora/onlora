@@ -2,7 +2,6 @@
 
 import { Input } from '@/components/ui/input'
 import { Search } from 'lucide-react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
@@ -19,14 +18,8 @@ export default function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-50 w-full bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-16 items-center px-6">
-        <Link href="/" className="mr-6 flex items-center space-x-2">
-          <span className="font-bold text-primary text-2xl tracking-tight">
-            onlora
-          </span>
-        </Link>
-
+    <header className="sticky top-0 z-50 w-full bg-background">
+      <div className="flex h-16 items-center px-6 ml-[250px]">
         <div className="flex-1 flex items-center justify-center max-w-2xl mx-auto">
           <form onSubmit={handleSearchSubmit} className="w-full">
             <div className="relative group">

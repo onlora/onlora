@@ -101,7 +101,12 @@ export default function Sidebar() {
   ]
 
   return (
-    <div className="h-[calc(100vh-4rem)] w-[250px] fixed left-0 top-16 flex flex-col bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <div className="h-screen w-[250px] fixed left-0 top-0 flex flex-col bg-background z-[51]">
+      <Link href="/" className="h-16 flex items-center px-6">
+        <span className="font-bold text-primary text-2xl tracking-tight">
+          onlora
+        </span>
+      </Link>
       <div className="flex-1 flex flex-col py-6 px-3">
         <nav className="space-y-1">
           {/* Main navigation items */}

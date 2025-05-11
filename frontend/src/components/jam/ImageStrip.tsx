@@ -1,18 +1,17 @@
 'use client'
 
-import { Card } from '@/components/ui/card'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
-import type { MessageImage } from '@/lib/api/jamApi' // Import shared type
+import type { MessageImage } from '@/lib/api/jamApi'
 import { cn } from '@/lib/utils'
+import { Check } from 'lucide-react'
 import Image from 'next/image'
 import type React from 'react'
 
 interface ImageStripProps {
   images: MessageImage[]
-  selectedImageIds?: Set<number> // Optional: Set of selected image IDs
-  onImageSelect?: (imageId: number) => void // Optional: Callback for selection
-  onImageActivate?: (image: MessageImage) => void // Optional: Callback for activating/viewing an image
-  // Add other props like loading state if needed
+  selectedImageIds?: Set<number>
+  onImageSelect?: (imageId: number) => void
+  onImageActivate?: (image: MessageImage) => void
 }
 
 // Placeholder images for development
@@ -40,72 +39,68 @@ const placeholderStripImages: MessageImage[] = [
 ]
 
 export const ImageStrip: React.FC<ImageStripProps> = ({
-  images = placeholderStripImages, // Use placeholder as default for now
+  images = placeholderStripImages,
   selectedImageIds = new Set(),
   onImageSelect = () => {},
-  onImageActivate = () => {}, // Default for new prop
+  onImageActivate = () => {},
 }) => {
   if (!images || images.length === 0) {
-    // Optionally render a placeholder or empty state
     return (
-      <div className="h-32 border-t bg-muted/20 flex items-center justify-center text-sm text-muted-foreground">
-        No images generated yet.
+      <div className="h-28 border-t bg-background flex items-center justify-center text-sm text-muted-foreground px-4 text-center">
+        No images generated yet. Type a prompt and hit generate.
       </div>
     )
   }
 
   return (
-    <div className="border-t bg-background p-2">
-      <ScrollArea className="w-full whitespace-nowrap rounded-md">
-        <div className="flex w-max space-x-2 p-2">
+    <div className="border-t bg-background/80 py-3 px-2 flex-shrink-0">
+      <ScrollArea className="w-full rounded-lg">
+        <div className="flex space-x-3 px-2">
           {images.map((image) => {
             const isSelected = selectedImageIds.has(image.id)
             return (
-              <Card
+              <button
                 key={image.id}
+                type="button"
                 className={cn(
-                  'relative h-24 w-24 shrink-0 overflow-hidden transition-all hover:scale-105 cursor-pointer',
+                  'relative h-28 w-28 shrink-0 rounded-lg overflow-hidden transition-all cursor-pointer group border-0 p-0',
                   isSelected
                     ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
-                    : '',
+                    : 'hover:ring-1 hover:ring-primary/40 hover:ring-offset-1 hover:ring-offset-background',
                 )}
                 onClick={() => {
                   onImageSelect(image.id)
-                  onImageActivate(image) // Call new handler
+                  onImageActivate(image)
                 }}
+                aria-label={`Generated image ${image.id}${isSelected ? ' (selected)' : ''}`}
               >
                 <Image
                   src={image.url}
                   alt={`Generated image ${image.id}`}
                   fill
                   className="object-cover"
-                  sizes="100px" // Approximate size for optimization
+                  sizes="112px"
                 />
-                {/* Optional: Add overlay/check mark for selected state */}
-                {isSelected && (
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-6 w-6 text-white"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <title>Selected</title>
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
-                  </div>
-                )}
-              </Card>
+
+                {/* Selection indicator */}
+                <div
+                  className={cn(
+                    'absolute top-2 right-2 h-5 w-5 rounded-full flex items-center justify-center transition-all',
+                    isSelected
+                      ? 'bg-primary'
+                      : 'bg-black/30 opacity-0 group-hover:opacity-100',
+                  )}
+                >
+                  {isSelected && <Check className="h-3 w-3 text-white" />}
+                </div>
+
+                {/* Hover overlay */}
+                <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
             )
           })}
         </div>
-        <ScrollBar orientation="horizontal" />
+        <ScrollBar orientation="horizontal" className="h-1.5" />
       </ScrollArea>
     </div>
   )
