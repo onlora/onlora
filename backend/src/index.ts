@@ -19,6 +19,7 @@ import {
 import commentRoutes from './routes/commentRoutes'
 import feedRoutes from './routes/feedRoutes'
 import jamRoutes from './routes/jamRoutes'
+import modelRoutes from './routes/modelRoutes'
 import postRoutes from './routes/postRoutes'
 import searchRoutes from './routes/searchRoutes'
 import userRoutes from './routes/userRoutes'
@@ -76,6 +77,7 @@ app.route('/api/comments', commentRoutes)
 app.route('/api/feed', feedRoutes)
 app.route('/api/users', userRoutes)
 app.route('/api/search', searchRoutes)
+app.route('/api/models', modelRoutes)
 
 // SSE Infrastructure
 interface TaskProgressNotifier {

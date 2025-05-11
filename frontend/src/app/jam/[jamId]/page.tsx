@@ -20,7 +20,7 @@ import {
 } from '@/lib/api/postApi' // Import createPost
 import { useMutation, useQueryClient } from '@tanstack/react-query' // useQuery no longer needed here
 import { AlertTriangle, ArrowLeft, Loader2, Paintbrush } from 'lucide-react' // Import icons
-import { useRouter, useSearchParams } from 'next/navigation' // Import useRouter and useSearchParams
+import { useParams, useRouter, useSearchParams } from 'next/navigation' // Import useRouter, useSearchParams, AND useParams
 import { useEffect, useMemo, useState } from 'react' // Import useMemo and useRef
 import { toast } from 'sonner' // Import toast for notifications
 
@@ -29,14 +29,9 @@ type ImageSize = '512x512' | '768x768' | '1024x1024'
 
 const CHAT_HISTORY_LENGTH = 15 // Display last 15 messages
 
-interface JamPageProps {
-  params: {
-    jamId: string
-  }
-}
-
-export default function JamPage({ params }: JamPageProps) {
-  const { jamId: jamIdFromParams } = params
+export default function JamPage() {
+  const routeParams = useParams() // Use useParams hook
+  const jamIdFromParams = routeParams.jamId as string // Extract jamId, ensure type assertion or validation
   const queryClient = useQueryClient() // Get query client instance
   const router = useRouter()
   const searchParams = useSearchParams() // Get searchParams
