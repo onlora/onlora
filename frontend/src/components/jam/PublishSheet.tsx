@@ -1,109 +1,131 @@
 'use client'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
-import type { MessageImage } from '@/lib/api/jamApi' // Assuming this type exists for image data
+import type { MessageImage } from '@/lib/api/jamApi'
+import { Tag, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 export type PostVisibility = 'public' | 'private'
 
-interface PublishData {
-  title: string
+export interface PublishData {
+  title: string // Keep title field for API compatibility
   description: string
   tags: string[]
-  visibility: PostVisibility
-  // communityId?: string; // Optional for now
 }
 
 interface PublishSheetProps {
   isOpen: boolean
   onOpenChange: (isOpen: boolean) => void
-  selectedImages: MessageImage[] // To display previews
-  onSubmit: (publishData: PublishData) => void // Changed from onPublish to onSubmit
+  selectedImages: MessageImage[]
+  onSubmit: (publishData: PublishData) => void
   isSubmitting?: boolean
-  initialTitle?: string // Added for remix pre-fill
-  initialTags?: string[] // Added for remix pre-fill
+  initialTitle?: string
+  initialTags?: string[]
 }
 
 export function PublishSheet({
   isOpen,
   onOpenChange,
   selectedImages,
-  onSubmit, // Changed from onPublish
+  onSubmit,
   isSubmitting,
-  initialTitle = '', // Default to empty string
-  initialTags = [], // Default to empty array
+  initialTitle = '',
+  initialTags = [],
 }: PublishSheetProps) {
-  const [title, setTitle] = useState(initialTitle)
+  // Remove debug logs
   const [description, setDescription] = useState('')
-  const [tags, setTags] = useState(initialTags.join(', '))
-  const [visibility, setVisibility] = useState<PostVisibility>('private')
+  const [tagInput, setTagInput] = useState('')
+  const [tags, setTags] = useState<string[]>(initialTags)
 
   useEffect(() => {
     if (isOpen) {
-      // Reset fields when sheet opens, based on initial props
-      setTitle(initialTitle || '')
-      setDescription('') // Assuming description is not pre-filled from remix
-      setTags((initialTags || []).join(', '))
-      setVisibility('private') // Default visibility
+      // Reset form when dialog opens
+      setDescription('')
+      setTagInput('')
+      setTags(initialTags || [])
     }
-  }, [isOpen, initialTitle, initialTags])
+  }, [isOpen, initialTags])
+
+  const handleTagAdd = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (
+      (e.key === 'Enter' || e.key === ' ' || e.key === ',') &&
+      tagInput.trim()
+    ) {
+      e.preventDefault()
+      const newTag = tagInput.trim().replace(/^#/, '').replace(/,/g, '')
+      if (newTag && !tags.includes(newTag)) {
+        setTags([...tags, newTag])
+      }
+      setTagInput('')
+    }
+  }
+
+  const removeTag = (tagToRemove: string) => {
+    setTags(tags.filter((tag) => tag !== tagToRemove))
+  }
 
   const handleSubmit = () => {
-    // Renamed from handlePublish
-    if (!title.trim() || selectedImages.length === 0) {
-      // TODO: Show error toast/message more formally
-      alert('Title and at least one image are required.')
+    if (selectedImages.length === 0) {
+      alert('At least one image is required.')
       return
     }
-    onSubmit({
-      title,
+
+    // Extract hashtags from description if they exist
+    const extractedTags = description.match(/#(\w+)/g) || []
+    const tagsFromDescription = extractedTags.map((tag) => tag.substring(1))
+
+    // Combine and deduplicate tags
+    const allTags = [...new Set([...tagsFromDescription, ...tags])]
+
+    // Generate a default title if none provided
+    const defaultTitle =
+      initialTitle ||
+      (description && description.length > 30
+        ? `${description.substring(0, 30)}...`
+        : description || 'My Vibe')
+
+    const publishData = {
+      title: defaultTitle, // Use description beginning or default
       description,
-      tags: tags
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter((tag) => tag),
-      visibility,
-    })
+      tags: allTags,
+    }
+
+    onSubmit(publishData)
   }
+
+  const characterLimit = 280
+  const characterCount = description.length
+  const remainingCharacters = characterLimit - characterCount
+  const isOverLimit = remainingCharacters < 0
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[525px]">
-        <DialogHeader>
-          <DialogTitle>Publish Your Vibe</DialogTitle>
-          <DialogDescription>
-            Share your selected images. Add a title, description, tags, and set
-            visibility.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          {/* Selected Images Preview Placeholder */}
+      <DialogContent className="sm:max-w-[650px] p-0 overflow-hidden rounded-xl">
+        <div className="flex flex-col p-4">
+          {/* Text Input Area */}
+          <Textarea
+            placeholder="What's your vibe?"
+            className="w-full border-none resize-none text-lg placeholder:text-gray-400 focus-visible:ring-0 p-0 h-auto min-h-[120px]"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            maxLength={characterLimit}
+          />
+
+          {/* Image Preview Section */}
           {selectedImages.length > 0 && (
-            <div className="mb-4">
-              <Label className="text-sm font-medium">
-                Selected Images ({selectedImages.length})
-              </Label>
-              <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 max-h-40 overflow-y-auto p-2 border rounded-md bg-muted/50">
+            <div className="mt-3 relative">
+              <div className="grid grid-cols-3 gap-2 rounded-xl overflow-hidden">
                 {selectedImages.map((image) => (
                   <div
                     key={image.id}
-                    className="relative aspect-square rounded-md overflow-hidden"
+                    className="relative aspect-square rounded-xl overflow-hidden"
                   >
                     <img
                       src={image.url}
-                      alt={`Selected creation ${image.id}`}
+                      alt="Selected vibe"
                       className="object-cover w-full h-full"
                     />
                   </div>
@@ -112,110 +134,62 @@ export function PublishSheet({
             </div>
           )}
 
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="title" className="text-right">
-              Title*
-            </Label>
-            <Input
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="col-span-3"
-              placeholder="My Awesome Vibe"
-              required
-            />
-          </div>
-          <div className="grid grid-cols-4 items-start gap-4">
-            <Label htmlFor="description" className="text-right pt-2">
-              Description
-            </Label>
-            <Textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="col-span-3"
-              placeholder="Tell us more about your art... (optional)"
-              rows={3}
-            />
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="tags" className="text-right">
-              Tags
-            </Label>
-            <Input
-              id="tags"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              className="col-span-3"
-              placeholder="e.g., fantasy, abstract, vibrant (comma-separated)"
-            />
-            {/* Future: Replace with a dedicated TagInput component */}
-          </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label className="text-right">Visibility*</Label>
-            <RadioGroup
-              value={visibility}
-              onValueChange={(value: string) =>
-                setVisibility(value as PostVisibility)
-              }
-              className="col-span-3 flex items-center space-x-4"
-              required
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="private" id="visibility-private" />
-                <Label htmlFor="visibility-private" className="font-normal">
-                  Private
-                </Label>
+          {/* Tags Section */}
+          <div className="mt-4 flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Tag className="h-4 w-4 text-gray-500" />
+              <div className="flex-1 flex items-center flex-wrap gap-2">
+                {tags.map((tag) => (
+                  <Badge
+                    key={tag}
+                    variant="secondary"
+                    className="flex items-center gap-1 px-2 py-0.5"
+                  >
+                    #{tag}
+                    <button
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      className="h-3 w-3 rounded-full inline-flex items-center justify-center hover:bg-gray-300 ml-1"
+                    >
+                      <X className="h-2 w-2" />
+                    </button>
+                  </Badge>
+                ))}
+                <input
+                  type="text"
+                  className="flex-1 min-w-[100px] bg-transparent border-none focus:outline-none p-0 h-6 text-sm placeholder:text-gray-400"
+                  placeholder="Add tags (press Space or Enter)"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={handleTagAdd}
+                />
               </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="public" id="visibility-public" />
-                <Label htmlFor="visibility-public" className="font-normal">
-                  Public
-                </Label>
-              </div>
-            </RadioGroup>
+            </div>
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="community" className="text-right">
-              Community
-            </Label>
-            {/* Placeholder for Community Select */}
-            <Input
-              id="community"
-              disabled
-              className="col-span-3"
-              placeholder="Community selection (coming soon)"
-            />
-            {/* 
-            <Select disabled>
-              <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Select a community (coming soon)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="general">General</SelectItem>
-              </SelectContent>
-            </Select> 
-            */}
+
+          {/* Bottom Action Bar */}
+          <div className="mt-4 pt-3 border-t border-gray-100 flex justify-between items-center">
+            <div className="flex-1" />
+            <div className="flex items-center gap-4">
+              {(isOverLimit || remainingCharacters <= 20) && (
+                <div
+                  className={`text-xs ${isOverLimit ? 'text-red-500' : 'text-gray-500'}`}
+                >
+                  {remainingCharacters}
+                </div>
+              )}
+              <Button
+                className="rounded-full px-6 py-1.5 font-medium"
+                onClick={handleSubmit}
+                disabled={
+                  isSubmitting || selectedImages.length === 0 || isOverLimit
+                }
+              >
+                {isSubmitting ? 'Publishing...' : 'Publish'}
+              </Button>
+            </div>
           </div>
         </div>
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={handleSubmit} // Changed from handlePublish
-            disabled={
-              isSubmitting || selectedImages.length === 0 || !title.trim()
-            }
-          >
-            {isSubmitting ? 'Publishing...' : 'Publish Vibe'}
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

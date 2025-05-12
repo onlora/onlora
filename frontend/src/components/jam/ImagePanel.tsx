@@ -3,7 +3,17 @@
 import { Button } from '@/components/ui/button'
 import type { MessageImage } from '@/lib/api/jamApi'
 import { cn } from '@/lib/utils'
-import { Check, Grid2X2, Maximize, Pocket, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  Check,
+  CheckCircle,
+  Download,
+  Grid,
+  LayoutGrid,
+  Maximize,
+  Pocket,
+  X,
+} from 'lucide-react'
 import { useState } from 'react'
 
 interface ImagePanelProps {
@@ -25,147 +35,238 @@ export const ImagePanel = ({
   onPublish,
   onClose,
 }: ImagePanelProps) => {
-  const [viewMode, setViewMode] = useState<'single' | 'grid'>('grid')
+  // Toggle between grid and single image view
+  const [viewMode, setViewMode] = useState<'grid' | 'single'>('grid')
+  // Toggle between compact (3 columns) and comfortable (2 columns) view
+  const [isCompactView, setIsCompactView] = useState(false)
+  // Currently focused image for single view
+  const [focusedImage, setFocusedImage] = useState<MessageImage | null>(
+    selectedImage,
+  )
 
-  // Ensure the selected image is first in the display
-  const imagesToDisplay = selectedImage
-    ? [selectedImage, ...images.filter((img) => img.id !== selectedImage.id)]
-    : images
+  // Handler for viewing a single image
+  const handleViewImage = (image: MessageImage) => {
+    setFocusedImage(image)
+    setViewMode('single')
+  }
+
+  // Go back to grid view
+  const handleBackToGrid = () => {
+    setViewMode('grid')
+  }
+
+  // Handle download original image
+  const handleDownloadImage = (image: MessageImage) => {
+    // Create a link element and trigger download
+    const link = document.createElement('a')
+    link.href = image.url
+    link.download = `image-${image.id}.jpg`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-b from-background to-background/95 shadow-[0_0_15px_rgba(0,0,0,0.05)_inset]">
-      {/* Header */}
-      <div className="px-6 py-5 flex justify-between items-center">
-        <div className="flex items-center gap-2">
-          <h3 className="text-lg font-medium text-foreground/90">Gallery</h3>
-          <div className="text-sm text-muted-foreground ml-2 bg-accent/50 px-2 py-0.5 rounded-full">
-            {selectedImageIds.size > 0
-              ? `${selectedImageIds.size} selected`
-              : `${images.length} images`}
-          </div>
-        </div>
+    <div className="h-full flex flex-col bg-gradient-to-b from-background to-background/95">
+      {/* Header - changes based on view mode */}
+      <div className="px-4 py-3 flex justify-between items-center border-b border-accent/10">
+        {viewMode === 'grid' ? (
+          // Grid view header
+          <>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-medium">Gallery</h3>
+              <div className="text-xs text-muted-foreground bg-accent/20 px-2 py-0.5 rounded-full">
+                {selectedImageIds.size} selected
+              </div>
+            </div>
 
-        <div className="flex items-center gap-2">
-          <div className="bg-accent/50 rounded-full p-0.5 flex">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setViewMode('single')}
-              className={cn(
-                'h-8 rounded-full',
-                viewMode === 'single' &&
-                  'bg-background text-foreground shadow-sm',
-              )}
-            >
-              <Maximize className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setViewMode('grid')}
-              className={cn(
-                'h-8 rounded-full',
-                viewMode === 'grid' &&
-                  'bg-background text-foreground shadow-sm',
-              )}
-            >
-              <Grid2X2 className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {onClose && (
+            {onClose && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                className="h-7 w-7 rounded-full"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </>
+        ) : (
+          // Single view header - simplified with all controls in one place
+          <>
             <Button
               variant="ghost"
               size="icon"
-              onClick={onClose}
-              className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+              onClick={handleBackToGrid}
+              className="h-8 w-8 p-0 rounded-full"
             >
-              <X className="h-4 w-4" />
+              <ArrowLeft className="h-4 w-4" />
             </Button>
-          )}
-        </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-full text-xs"
+                onClick={() =>
+                  focusedImage && handleDownloadImage(focusedImage)
+                }
+              >
+                <Download className="h-3.5 w-3.5 mr-1" />
+                Download
+              </Button>
+
+              <Button
+                variant={
+                  selectedImageIds.has(focusedImage?.id || -1)
+                    ? 'default'
+                    : 'outline'
+                }
+                size="sm"
+                className="h-8 rounded-full text-xs min-w-[80px]"
+                onClick={() => focusedImage && onImageSelect(focusedImage.id)}
+              >
+                {selectedImageIds.has(focusedImage?.id || -1) ? (
+                  <>
+                    <CheckCircle className="h-3.5 w-3.5 mr-1" />
+                    Selected
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3.5 w-3.5 mr-1" />
+                    Select
+                  </>
+                )}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Content area */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-6">
-        {/* Single image view */}
-        {viewMode === 'single' && selectedImage && (
-          <div className="relative aspect-square bg-accent/20 rounded-xl overflow-hidden shadow-sm mt-4 pt-6">
-            <img
-              src={selectedImage.url}
-              alt={`Generated content ${selectedImage.id}`}
-              className="w-full h-full object-contain"
-            />
-          </div>
-        )}
-
-        {/* Grid view */}
-        {viewMode === 'grid' && (
-          <div className="grid grid-cols-2 gap-4 mt-4">
-            {imagesToDisplay.map((image) => {
-              const isSelected = selectedImageIds.has(image.id)
-              return (
-                <button
-                  key={image.id}
-                  type="button"
-                  className={cn(
-                    'relative aspect-square rounded-xl overflow-hidden transition-all cursor-pointer group',
-                    isSelected
-                      ? 'ring-2 ring-primary ring-offset-2 ring-offset-background shadow-md'
-                      : 'hover:shadow-md hover:scale-[1.01] duration-200 ease-out',
-                  )}
-                  onClick={() => onImageSelect(image.id)}
-                >
-                  <img
-                    src={image.url}
-                    alt={`Generated content ${image.id}`}
-                    className="w-full h-full object-cover"
-                  />
-
-                  {/* Selection indicator */}
-                  <div
+      {/* Content area - changes based on view mode */}
+      <div className="flex-1 overflow-y-auto">
+        {viewMode === 'grid' ? (
+          // Grid view
+          <div className="p-3">
+            <div
+              className={cn(
+                'grid gap-2',
+                isCompactView ? 'grid-cols-3' : 'grid-cols-2',
+              )}
+            >
+              {images.map((image) => {
+                const isSelected = selectedImageIds.has(image.id)
+                return (
+                  <button
+                    key={image.id}
+                    type="button"
                     className={cn(
-                      'absolute top-2 right-2 h-6 w-6 rounded-full flex items-center justify-center transition-all backdrop-blur-sm',
+                      'relative aspect-square rounded-lg overflow-hidden transition-all cursor-pointer group',
                       isSelected
-                        ? 'bg-primary/90 shadow-sm'
-                        : 'bg-black/30 opacity-0 group-hover:opacity-100',
+                        ? 'ring-2 ring-primary ring-offset-1 ring-offset-background shadow-sm'
+                        : 'hover:brightness-90',
                     )}
+                    onClick={() => onImageSelect(image.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        onImageSelect(image.id)
+                      }
+                    }}
+                    aria-label={`Select image ${image.id}`}
                   >
-                    {isSelected && <Check className="h-3.5 w-3.5 text-white" />}
-                  </div>
+                    {/* Image */}
+                    <img
+                      src={image.url}
+                      alt={`Generated content ${image.id}`}
+                      className="w-full h-full object-cover"
+                    />
 
-                  {/* Hover overlay */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                </button>
-              )
-            })}
+                    {/* Maximize button */}
+                    <button
+                      type="button"
+                      className="absolute top-1 left-1 h-7 w-7 bg-black/40 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-black/60 transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation() // Prevent selection
+                        handleViewImage(image)
+                      }}
+                      aria-label="View full size"
+                    >
+                      <Maximize className="h-3.5 w-3.5 text-white" />
+                    </button>
+
+                    {/* Selection indicator */}
+                    {isSelected && (
+                      <div className="absolute top-1 right-1 h-6 w-6 bg-primary rounded-full flex items-center justify-center">
+                        <Check className="h-3 w-3 text-primary-foreground" />
+                      </div>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : (
+          // Single image view - simplified with just the image
+          <div className="flex-1 flex items-center justify-center p-4">
+            {focusedImage && (
+              <div className="max-h-full relative rounded-lg overflow-hidden">
+                <img
+                  src={focusedImage.url}
+                  alt={`Generated content ${focusedImage.id}`}
+                  className="max-h-[calc(100vh-120px)] object-contain"
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Action footer */}
-      <div className="px-6 py-5 mt-auto bg-accent/10 backdrop-blur-[2px]">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-10 w-10 rounded-full flex-shrink-0"
-            disabled={selectedImageIds.size === 0}
-            onClick={onSave}
-            title="Save to Gallery"
-          >
-            <Pocket className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="default"
-            className="flex-1 rounded-full py-6"
-            disabled={selectedImageIds.size === 0}
-            onClick={onPublish}
-          >
-            Post
-          </Button>
+      {/* Action footer - only shown in grid view */}
+      {viewMode === 'grid' && (
+        <div className="px-4 py-3 bg-accent/5 border-t border-accent/10">
+          <div className="flex items-center justify-between">
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full"
+                onClick={() => setIsCompactView(!isCompactView)}
+                title={isCompactView ? 'Larger Grid' : 'Compact Grid'}
+              >
+                {isCompactView ? (
+                  <LayoutGrid className="h-4 w-4" />
+                ) : (
+                  <Grid className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 rounded-full"
+                disabled={selectedImageIds.size === 0}
+                onClick={onSave}
+                title="Save to your private gallery"
+              >
+                <Pocket className="h-4 w-4" />
+              </Button>
+
+              <Button
+                variant="default"
+                size="sm"
+                className="rounded-full px-4"
+                disabled={selectedImageIds.size === 0}
+                onClick={onPublish}
+              >
+                Publish{' '}
+                {selectedImageIds.size > 0 && `(${selectedImageIds.size})`}
+              </Button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

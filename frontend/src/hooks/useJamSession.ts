@@ -206,8 +206,6 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
             ...(newAiMessage.images || []),
           ])
         }
-
-        toast.success('Image generated successfully!')
       },
       onError: (error) => {
         toast.error(`Image generation failed: ${error.message}`)

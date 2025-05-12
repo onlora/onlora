@@ -4,7 +4,7 @@ import ProtectedPage from '@/components/auth/ProtectedPage'
 import { ChatInput } from '@/components/jam/ChatInput'
 import { ImagePanel } from '@/components/jam/ImagePanel'
 import { MessageList } from '@/components/jam/MessageList'
-import { PublishSheet } from '@/components/jam/PublishSheet'
+import { type PublishData, PublishSheet } from '@/components/jam/PublishSheet'
 import { Button } from '@/components/ui/button'
 import { useJamSession } from '@/hooks/useJamSession'
 import type { ApiError } from '@/lib/api/apiClient'
@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 type ImageSize = '512x512' | '768x768' | '1024x1024'
 const CHAT_HISTORY_LENGTH = 15
@@ -56,6 +57,11 @@ export default function JamPage() {
     useState<ApiAIModelDataFromApi | null>(null)
   const [showImagePanel, setShowImagePanel] = useState(false)
 
+  // Add a local copy of all images from all messages
+  const [allAvailableImages, setAllAvailableImages] = useState<MessageImage[]>(
+    [],
+  )
+
   // Jam session hook for messaging and image generation
   const {
     messages: allMessages,
@@ -67,6 +73,52 @@ export default function JamPage() {
     resolvedJamId,
     isInitializing,
   } = useJamSession(jamIdFromParams)
+
+  // Extract all images from messages when they load or change
+  useEffect(() => {
+    // Only process when messages are loaded and not empty
+    if (!isLoadingMessages && allMessages.length > 0) {
+      // Extract images from all AI messages
+      const allImagesFromMessages: MessageImage[] = []
+
+      for (const message of allMessages) {
+        if (
+          message.role === 'ai' &&
+          message.images &&
+          message.images.length > 0
+        ) {
+          allImagesFromMessages.push(...message.images)
+        }
+      }
+
+      // Update state with all found images, preserving any existing images not in messages
+      if (allImagesFromMessages.length > 0) {
+        setAllAvailableImages((prevImages) => {
+          // Create a map of existing image IDs for quick lookup
+          const existingImageIds = new Set(prevImages.map((img) => img.id))
+
+          // Filter out new images that aren't already in our collection
+          const newImages = allImagesFromMessages.filter(
+            (img) => !existingImageIds.has(img.id),
+          )
+
+          // Only update if we have new images to add
+          if (newImages.length > 0) {
+            return [...prevImages, ...newImages]
+          }
+
+          return prevImages
+        })
+      }
+    }
+  }, [allMessages, isLoadingMessages])
+
+  // Debug: log when jamGeneratedImages changes
+  useEffect(() => {
+    console.log(
+      `jamGeneratedImages updated: ${jamGeneratedImages.length} images`,
+    )
+  }, [jamGeneratedImages])
 
   // Auto-scroll to bottom when messages update
   useEffect(() => {
@@ -109,15 +161,98 @@ export default function JamPage() {
   )
 
   // Filter selected images for publication
-  const imagesToPublish = useMemo(
-    () => jamGeneratedImages.filter((img) => selectedImageIds.has(img.id)),
-    [jamGeneratedImages, selectedImageIds],
-  )
+  const imagesToPublish = useMemo(() => {
+    // Look for selected images in all available images, not just jamGeneratedImages
+    const selectedImages: MessageImage[] = []
 
-  // Sort images from newest to oldest
-  const sortedImages = useMemo(() => {
-    return [...jamGeneratedImages].reverse()
-  }, [jamGeneratedImages])
+    // First check in jamGeneratedImages
+    if (jamGeneratedImages.length > 0) {
+      const fromGenerated = jamGeneratedImages.filter((img) =>
+        selectedImageIds.has(img.id),
+      )
+      selectedImages.push(...fromGenerated)
+    }
+
+    // Then check in allAvailableImages if we haven't found all selected images
+    if (
+      selectedImages.length < selectedImageIds.size &&
+      allAvailableImages.length > 0
+    ) {
+      const fromAvailable = allAvailableImages.filter(
+        (img) =>
+          selectedImageIds.has(img.id) &&
+          !selectedImages.some((selected) => selected.id === img.id),
+      )
+      selectedImages.push(...fromAvailable)
+    }
+
+    // Finally, try to extract from messages if needed
+    if (selectedImages.length < selectedImageIds.size) {
+      for (const message of allMessages) {
+        if (
+          message.role === 'ai' &&
+          message.images &&
+          message.images.length > 0
+        ) {
+          const fromMessage = message.images.filter(
+            (img) =>
+              selectedImageIds.has(img.id) &&
+              !selectedImages.some((selected) => selected.id === img.id),
+          )
+          selectedImages.push(...fromMessage)
+        }
+      }
+    }
+
+    return selectedImages
+  }, [jamGeneratedImages, selectedImageIds, allAvailableImages, allMessages])
+
+  // Use all available images as the source for the image panel, not just recent ones
+  const imagesForPanel = useMemo(() => {
+    // First try to use jamGeneratedImages if available (useJamSession's internal collection)
+    if (jamGeneratedImages.length > 0) {
+      return [...jamGeneratedImages].reverse()
+    }
+
+    // Otherwise fall back to our local collection from all messages
+    if (allAvailableImages.length > 0) {
+      return [...allAvailableImages].reverse()
+    }
+
+    // If nothing else, try extracting images directly from recent messages
+    const directFromMessages: MessageImage[] = []
+    for (const message of displayMessages) {
+      if (
+        message.role === 'ai' &&
+        message.images &&
+        message.images.length > 0
+      ) {
+        directFromMessages.push(...message.images)
+      }
+    }
+
+    if (directFromMessages.length > 0) {
+      // Also add these to our allAvailableImages collection for future use
+      setAllAvailableImages((prev) => {
+        const existingIds = new Set(prev.map((img) => img.id))
+        const newImages = directFromMessages.filter(
+          (img) => !existingIds.has(img.id),
+        )
+        return newImages.length > 0 ? [...prev, ...newImages] : prev
+      })
+
+      return directFromMessages.reverse()
+    }
+
+    return []
+  }, [jamGeneratedImages, allAvailableImages, displayMessages])
+
+  // Monitor PublishSheet and ensure selected images are available
+  useEffect(() => {
+    if (isPublishSheetOpen && selectedImageIds.size === 0 && activatedImage) {
+      setSelectedImageIds(new Set([activatedImage.id]))
+    }
+  }, [isPublishSheetOpen, selectedImageIds, activatedImage])
 
   // Handler functions
   const handleSubmitPrompt = (promptText: string) => {
@@ -139,13 +274,27 @@ export default function JamPage() {
     })
   }
 
+  // Enhanced image click handler - when clicking on a message image
   const handleImageClick = (image: MessageImage) => {
     setActivatedImage(image)
     setShowImagePanel(true)
-    // Pre-select the activated image if it's not already selected
-    if (!selectedImageIds.has(image.id)) {
-      handleImageSelect(image.id)
-    }
+
+    // Store all available images if not already stored
+    setAllAvailableImages((prev) => {
+      // Check if this image is already in our collection
+      if (prev.some((img) => img.id === image.id)) {
+        return prev
+      }
+      // Add it if it's not already there
+      return [...prev, image]
+    })
+
+    // Always add the clicked image to selection
+    setSelectedImageIds((prev) => {
+      const newSet = new Set(prev)
+      newSet.add(image.id)
+      return newSet
+    })
   }
 
   const handleClosePanel = () => {
@@ -153,29 +302,56 @@ export default function JamPage() {
   }
 
   const handlePublish = () => {
-    if (imagesToPublish.length > 0) {
+    // If no images are selected but there's an activated image, use that
+    if (selectedImageIds.size === 0 && activatedImage) {
+      setSelectedImageIds(new Set([activatedImage.id]))
+    }
+
+    // Only open publish sheet if we have images to publish
+    if (selectedImageIds.size > 0) {
       setIsPublishSheetOpen(true)
+    } else {
+      alert('Please select at least one image to publish')
     }
   }
 
   const handleSaveToGallery = () => {
     // TODO: Implement save to gallery functionality
     console.log('Save to gallery:', Array.from(selectedImageIds))
+
+    // Show toast notification
+    toast.success(
+      `${selectedImageIds.size} image${selectedImageIds.size !== 1 ? 's' : ''} saved to gallery`,
+    )
   }
 
   // Publish post mutation
   const { mutate: publishPost, isPending: isPublishingPost } = useMutation<
     { postId: number },
     ApiError,
-    Omit<CreatePostPayload, 'imageIds' | 'jamId'>
+    PublishData
   >({
     mutationFn: async (formData) => {
       if (!resolvedJamId) throw new Error('Jam ID not resolved for publishing')
 
+      // Get the image IDs for publishing
+      const imageIds = Array.from(selectedImageIds)
+
+      // Fall back to activated image if needed
+      if (imageIds.length === 0 && activatedImage) {
+        imageIds.push(activatedImage.id)
+      }
+
+      // Final check - we need at least one image
+      if (imageIds.length === 0) {
+        throw new Error('No images selected for publishing')
+      }
+
       const payload: CreatePostPayload = {
         ...formData,
-        imageIds: Array.from(selectedImageIds),
+        imageIds: imageIds,
         jamId: Number.parseInt(resolvedJamId, 10),
+        visibility: 'public', // Always public when publishing
       }
 
       // Add remix metadata if available
@@ -193,7 +369,9 @@ export default function JamPage() {
       queryClient.invalidateQueries({ queryKey: ['feed', 'latest'] })
       router.push(`/posts/${data.postId}`)
     },
-    onError: (error) => console.error('Error publishing post:', error),
+    onError: (error) => {
+      console.error('Error publishing post:', error)
+    },
   })
 
   // Loading state
@@ -327,29 +505,42 @@ export default function JamPage() {
           {/* Right side - Image panel */}
           {showImagePanel && (
             <div className="w-[350px] md:w-[450px] xl:w-[500px] transition-all duration-300 ease-in-out">
-              <ImagePanel
-                images={sortedImages}
-                selectedImage={activatedImage}
-                selectedImageIds={selectedImageIds}
-                onImageSelect={handleImageSelect}
-                onSave={handleSaveToGallery}
-                onPublish={handlePublish}
-                onClose={handleClosePanel}
-              />
+              {imagesForPanel.length === 0 ? (
+                <div className="h-full flex items-center justify-center bg-accent/10 p-6 text-center">
+                  <div>
+                    <p className="mb-2 text-lg">No images available</p>
+                    <p className="text-sm text-muted-foreground">
+                      Generate some images with the AI to see them here.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <ImagePanel
+                  images={imagesForPanel}
+                  selectedImage={activatedImage}
+                  selectedImageIds={selectedImageIds}
+                  onImageSelect={handleImageSelect}
+                  onSave={handleSaveToGallery}
+                  onPublish={handlePublish}
+                  onClose={handleClosePanel}
+                />
+              )}
             </div>
           )}
         </div>
 
-        {/* Publish sheet */}
-        <PublishSheet
-          isOpen={isPublishSheetOpen}
-          onOpenChange={setIsPublishSheetOpen}
-          selectedImages={imagesToPublish}
-          onSubmit={publishPost}
-          isSubmitting={isPublishingPost}
-          initialTitle={initialPublishData?.title || ''}
-          initialTags={initialPublishData?.tags || []}
-        />
+        {/* Publish sheet - ensure we always use the most up-to-date image selection */}
+        {isPublishSheetOpen && (
+          <PublishSheet
+            isOpen={isPublishSheetOpen}
+            onOpenChange={setIsPublishSheetOpen}
+            selectedImages={imagesToPublish}
+            onSubmit={publishPost}
+            isSubmitting={isPublishingPost}
+            initialTitle={initialPublishData?.title || ''}
+            initialTags={initialPublishData?.tags || []}
+          />
+        )}
       </div>
     </ProtectedPage>
   )
