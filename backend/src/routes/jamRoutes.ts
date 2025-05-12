@@ -3,18 +3,16 @@ import { type Context, Hono, type TypedResponse } from 'hono'
 import { pino } from 'pino' // Assuming pino is used for logging, adjust if global logger is preferred
 import { z } from 'zod'
 
-import crypto from 'node:crypto' // For generating taskId
 import { sql } from 'drizzle-orm'
 import { REQUIRED_VE_FOR_GENERATION } from '../config/constants' // Import the constant
-import { GEN_TASK_QUEUE_NAME, type GenTaskPayload } from '../config/queues'
 import { db } from '../db'
 import { jams, messages as messagesTable } from '../db/schema' // usersTable for VE check, messagesTable
 import { verifyUserJamOwnership } from '../lib/dbUtils' // Import new helper
-import jobQueue from '../lib/jobQueue' // pg-boss instance
 import {
   type AuthenticatedContextEnv,
   requireAuthMiddleware,
 } from '../middleware/auth'
+import { imageGenerationService } from '../services/imageGenerationService' // Cleaned up import
 import { deductVibeEnergy } from '../services/veService' // Import new VE service
 // Import other necessary things like pg-boss types/instance if needed for generate route later
 
@@ -39,9 +37,29 @@ interface JamRoutesAppEnv extends AuthenticatedContextEnv {
   }
 }
 
-// Define a union type for possible JSON responses from the generate endpoint
-type GenerateImageResponse =
-  | { taskId: string }
+// Type for an image object stored in the messages.images JSONB column
+interface MessageImageData {
+  id: string // A unique ID for this image instance, e.g., timestamp or UUID
+  url: string // URL or Base64 Data URI
+  altText?: string
+  // Potentially other metadata: width, height, modelUsed etc.
+}
+
+// Updated response type for the frontend.
+interface SuccessfulGenerationClientResponse {
+  id: number // ID of the newly created assistant message
+  jamId: number
+  role: 'ai' // Consistent with schema
+  text: string | null // text can be null
+  images: MessageImageData[] | null // Array of image data objects, can be null
+  createdAt: string // ISO string
+  // For simplicity, we can also provide top-level fields for the first image if frontend expects it:
+  imageUrl?: string // primary image URL
+  altText?: string // primary image alt text
+}
+
+type GenerateImageClientResponse =
+  | SuccessfulGenerationClientResponse
   | { code: number; message: string; currentVE?: number; requiredVE?: number }
   | { code: number; message: string } // Generic error
 
@@ -107,7 +125,7 @@ jamApp.post(
           {
             code: 500,
             message: 'Failed to create jam session',
-          } as GenerateImageResponse,
+          } as GenerateImageClientResponse,
           500 as ValidHttpStatusCodes,
         )
       }
@@ -125,7 +143,7 @@ jamApp.post(
         {
           code: 500,
           message: 'Internal server error while creating jam',
-        } as GenerateImageResponse,
+        } as GenerateImageClientResponse,
         500 as ValidHttpStatusCodes,
       )
     }
@@ -139,7 +157,7 @@ jamApp.post(
   zValidator('json', generateImageRequestBodySchema),
   async (
     c: Context<JamRoutesAppEnv>,
-  ): Promise<TypedResponse<GenerateImageResponse>> => {
+  ): Promise<TypedResponse<GenerateImageClientResponse>> => {
     const user = c.get('user')
     if (!user || !user.id) {
       pinoLogger.error(
@@ -173,14 +191,17 @@ jamApp.post(
       // Verify jam ownership (optional, depends on if generation should be tied to owning the jam)
       // For now, we assume a user can generate for any jamId they have, linking via prompt.
       // If strict ownership is needed:
-      // const ownership = await verifyUserJamOwnership(user.id, jamId);
-      // if (!ownership.jamExists) {
-      //   return c.json({ code: 404, message: 'Jam session not found.' }, 404);
-      // }
-      // if (!ownership.isOwner) {
-      //   logger.warn({ userId: user.id, jamId }, "User tried to generate for a jam they don't own.");
-      //   return c.json({ code: 403, message: 'Forbidden.' }, 403);
-      // }
+      const ownership = await verifyUserJamOwnership(user.id, jamId)
+      if (!ownership.jamExists) {
+        return c.json({ code: 404, message: 'Jam session not found.' }, 404)
+      }
+      if (!ownership.isOwner) {
+        pinoLogger.warn(
+          { userId: user.id, jamId },
+          "User tried to generate for a jam they don't own.",
+        )
+        return c.json({ code: 403, message: 'Forbidden.' }, 403)
+      }
 
       // Step 1 & 2: Check and Deduct Vibe Energy using veService
       const veResult = await deductVibeEnergy(
@@ -210,7 +231,7 @@ jamApp.post(
             ...(veResult.requiredVE !== undefined && {
               requiredVE: veResult.requiredVE,
             }),
-          } as GenerateImageResponse,
+          } as GenerateImageClientResponse,
           (veResult.statusCode || 400) as ValidHttpStatusCodes,
         )
       }
@@ -238,51 +259,113 @@ jamApp.post(
         )
       }
 
-      // Step 3: Publish task to pg-boss
-      if (!jobQueue) {
-        pinoLogger.error(
-          'Job queue (pg-boss) is not initialized. Cannot publish generate task.',
-        )
-        // Potentially refund VE here or mark for refund if this is critical path
-        return c.json(
-          {
-            code: 503,
-            message: 'Image generation service temporarily unavailable.',
-          },
-          503 as ValidHttpStatusCodes,
-        )
-      }
-
-      const taskId = crypto.randomUUID()
-      const jobPayload: GenTaskPayload = {
-        taskId,
-        jamId: jamId.toString(), // Convert number jamId to string for payload
+      const serviceParams = {
         prompt: validatedBody.prompt,
-        model: validatedBody.modelId, // Renaming to model as per GenTaskPayload
+        modelId: validatedBody.modelId,
+        modelProvider: validatedBody.modelProvider,
         size: validatedBody.size,
-        userId: user.id,
-        // modelProvider: validatedBody.modelProvider, // If GenTaskPayload needs it
+        n: 1, // Generate 1 image for now
+      }
+      const serviceResponse =
+        await imageGenerationService.generateImageDirectly(serviceParams)
+
+      if (
+        !serviceResponse ||
+        !serviceResponse.images ||
+        serviceResponse.images.length === 0
+      ) {
+        pinoLogger.error(
+          { userId: user.id, jamId, params: serviceParams },
+          'Service returned no images.',
+        )
+        return c.json(
+          { code: 500, message: 'Image generation failed: No image data.' },
+          500 as ValidHttpStatusCodes,
+        )
       }
 
-      await jobQueue.publish(GEN_TASK_QUEUE_NAME, jobPayload)
+      const firstImage = serviceResponse.images[0]
+      const imageUrlToStore =
+        firstImage.url || `data:image/png;base64,${firstImage.base64}`
+      const imageAltText = `Generated image for: "${validatedBody.prompt.substring(0, 100)}${validatedBody.prompt.length > 100 ? '...' : ''}"`
+
+      const newImageData: MessageImageData = {
+        id: Date.now().toString(), // Simple unique ID for the image object
+        url: imageUrlToStore,
+        altText: imageAltText,
+      }
+
+      const assistantMessageText = "Here's the image you requested:"
+      const insertedAssistantMessages = await db
+        .insert(messagesTable)
+        .values({
+          jamId: jamId,
+          role: 'ai', // Use 'ai' as per schema
+          text: assistantMessageText,
+          images: [newImageData], // Store as an array in the JSONB column
+        })
+        .returning()
+
+      if (
+        !insertedAssistantMessages ||
+        insertedAssistantMessages.length === 0
+      ) {
+        pinoLogger.error(
+          { userId: user.id, jamId },
+          'Failed to store assistant message.',
+        )
+        return c.json(
+          { code: 500, message: 'Failed to save generated image message.' },
+          500 as ValidHttpStatusCodes,
+        )
+      }
+
+      const newAssistantMessage = insertedAssistantMessages[0]
+
       pinoLogger.info(
-        { userId: user.id, jamId, taskId, jobName: GEN_TASK_QUEUE_NAME },
-        'Image generation task published to queue',
+        { userId: user.id, jamId, messageId: newAssistantMessage.id },
+        'Assistant message stored.',
       )
 
-      // Step 4: Return taskId
-      return c.json({ taskId: taskId }, 202 as ValidHttpStatusCodes) // 202 Accepted
-    } catch (error) {
+      // Ensure createdAt and jamId are not null for the response
+      const createdAt = newAssistantMessage.createdAt
+        ? newAssistantMessage.createdAt.toISOString()
+        : new Date().toISOString()
+      const responseJamId =
+        newAssistantMessage.jamId !== null ? newAssistantMessage.jamId : jamId // Fallback, though jamId on message should be set
+
+      const clientResponse: SuccessfulGenerationClientResponse = {
+        id: newAssistantMessage.id,
+        jamId: responseJamId,
+        role: newAssistantMessage.role as 'ai', // Role will be 'ai'
+        text: newAssistantMessage.text,
+        images: newAssistantMessage.images as MessageImageData[] | null, // Cast if necessary, or parse
+        createdAt: createdAt,
+        // Provide top-level fields for the first image for easier frontend consumption initially
+        imageUrl:
+          newAssistantMessage.images &&
+          Array.isArray(newAssistantMessage.images) &&
+          newAssistantMessage.images.length > 0
+            ? (newAssistantMessage.images[0] as MessageImageData).url
+            : undefined,
+        altText:
+          newAssistantMessage.images &&
+          Array.isArray(newAssistantMessage.images) &&
+          newAssistantMessage.images.length > 0
+            ? (newAssistantMessage.images[0] as MessageImageData).altText
+            : undefined,
+      }
+
+      return c.json(clientResponse, 200 as ValidHttpStatusCodes)
+    } catch (error: unknown) {
       pinoLogger.error(
-        { err: error, userId: user?.id },
-        'Error during image generation process',
+        { err: error, userId: user?.id, jamId },
+        'Unhandled error in generation route.',
       )
-      // If VE was deducted but job publishing failed, we might need to refund VE.
-      // This requires more complex transaction/rollback logic or a compensating transaction.
-      // For now, just logging the error.
-      // if (userHadSufficientVE && user && user.id) { /* TODO: Add VE refund logic here if error after deduction */ }
+      let message = 'An unexpected error occurred.'
+      if (error instanceof Error) message = error.message
       return c.json(
-        { code: 500, message: 'Internal server error during image generation' },
+        { code: 500, message } as GenerateImageClientResponse,
         500 as ValidHttpStatusCodes,
       )
     }

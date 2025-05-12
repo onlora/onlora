@@ -3,6 +3,7 @@ import { apiClient } from './apiClient'
 export interface AIModelData {
   value: string
   label: string
+  provider: 'google' | 'openai'
   description: string
 }
 

@@ -24,7 +24,6 @@ import { toast } from 'sonner'
 
 import CommentInput from '@/components/comments/CommentInput'
 import CommentItem from '@/components/comments/CommentItem'
-import { ImageLightbox } from '@/components/jam/ImageLightbox'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -781,16 +780,6 @@ export default function PostDetailPage() {
             </p>
           )}
       </div>
-
-      {/* Lightbox Component */}
-      {lightboxImage && (
-        <ImageLightbox
-          isOpen={lightboxOpen}
-          onOpenChange={setLightboxOpen}
-          imageUrl={lightboxImage.url}
-          altText={post.title || 'Post image'}
-        />
-      )}
     </Card>
   )
 }

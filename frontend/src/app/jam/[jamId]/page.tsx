@@ -1,225 +1,202 @@
-'use client' // Need client component for state and hooks
+'use client'
 
-import ProtectedPage from '@/components/auth/ProtectedPage' // Import the wrapper
-import { ActionBar } from '@/components/jam/ActionBar'
-import { ChatInput } from '@/components/jam/ChatInput' // Import the real component
-import { ImageLightbox } from '@/components/jam/ImageLightbox' // Import ImageLightbox
-import { ImageStrip } from '@/components/jam/ImageStrip' // Import the real component
-import { MessageList } from '@/components/jam/MessageList' // Import the real component
+import ProtectedPage from '@/components/auth/ProtectedPage'
+import { ChatInput } from '@/components/jam/ChatInput'
+import { ImagePanel } from '@/components/jam/ImagePanel'
+import { MessageList } from '@/components/jam/MessageList'
 import { PublishSheet } from '@/components/jam/PublishSheet'
 import { Button } from '@/components/ui/button'
-import { useJamSession } from '@/hooks/useJamSession' // Import useJamSession
-import type { ApiError } from '@/lib/api/apiClient' // Correct import for ApiError
-import type { GenerateImagePayload, MessageImage } from '@/lib/api/jamApi' // Import the API function
-// import type { ApiErrorResponse } from '@/lib/api/apiClient' // No longer needed here if mutation is removed
+import { useJamSession } from '@/hooks/useJamSession'
+import type { ApiError } from '@/lib/api/apiClient'
+import type { MessageImage } from '@/lib/api/jamApi'
+import type { AIModelData as ApiAIModelDataFromApi } from '@/lib/api/modelApi'
 import {
   type CreatePostPayload,
-  type PostCloneInfo, // Import PostCloneInfo type
+  type PostCloneInfo,
   createPost,
-  getPostCloneInfo, // Import getPostCloneInfo
-} from '@/lib/api/postApi' // Import createPost
-import { useMutation, useQueryClient } from '@tanstack/react-query' // useQuery no longer needed here
-import { AlertTriangle, ArrowLeft, Loader2, Paintbrush } from 'lucide-react' // Import icons
-import { useParams, useRouter, useSearchParams } from 'next/navigation' // Import useRouter, useSearchParams, AND useParams
-import { useEffect, useMemo, useState } from 'react' // Import useMemo and useRef
-import { toast } from 'sonner' // Import toast for notifications
+  getPostCloneInfo,
+} from '@/lib/api/postApi'
+import { cn } from '@/lib/utils'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Loader2,
+  MessageCircle,
+  Paintbrush,
+} from 'lucide-react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
-// Define possible image sizes
 type ImageSize = '512x512' | '768x768' | '1024x1024'
-
-const CHAT_HISTORY_LENGTH = 15 // Display last 15 messages
+const CHAT_HISTORY_LENGTH = 15
 
 export default function JamPage() {
-  const routeParams = useParams() // Use useParams hook
-  const jamIdFromParams = routeParams.jamId as string // Extract jamId, ensure type assertion or validation
-  const queryClient = useQueryClient() // Get query client instance
+  // Core state and hooks
+  const routeParams = useParams()
+  const jamIdFromParams = routeParams.jamId as string
+  const queryClient = useQueryClient()
   const router = useRouter()
-  const searchParams = useSearchParams() // Get searchParams
+  const searchParams = useSearchParams()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messageContainerRef = useRef<HTMLDivElement>(null)
 
-  // State for pre-filled data from a remixed post
+  // UI state
   const [initialPublishData, setInitialPublishData] =
     useState<PostCloneInfo | null>(null)
-
-  // Selected image IDs for publishing
   const [selectedImageIds, setSelectedImageIds] = useState<Set<number>>(
     new Set(),
   )
-  // Selected image size for generation
   const [selectedSize, setSelectedSize] = useState<ImageSize>('1024x1024')
   const [isPublishSheetOpen, setIsPublishSheetOpen] = useState(false)
+  const [activatedImage, setActivatedImage] = useState<MessageImage | null>(
+    null,
+  )
+  const [selectedModel, setSelectedModel] =
+    useState<ApiAIModelDataFromApi | null>(null)
+  const [showImagePanel, setShowImagePanel] = useState(false)
 
-  // Lightbox state
-  const [lightboxOpen, setLightboxOpen] = useState(false)
-  const [lightboxImage, setLightboxImage] = useState<MessageImage | null>(null)
-
-  // Use useJamSession for all jam-related state and logic
+  // Jam session hook for messaging and image generation
   const {
-    messages: allMessages, // All messages from the hook
+    messages: allMessages,
     isGenerating,
-    generationProgress,
-    generatedImages: jamGeneratedImages, // Use this for ImageStrip and PublishSheet logic
+    generatedImages: jamGeneratedImages,
     submitPrompt,
     isLoadingMessages,
     messagesError,
-    resolvedJamId, // Destructure resolvedJamId
-    isInitializing, // Destructure isInitializing
+    resolvedJamId,
+    isInitializing,
   } = useJamSession(jamIdFromParams)
 
-  // Effect to fetch clone info if remixSourcePostId is present on a new jam session
+  // Auto-scroll to bottom when messages update
+  useEffect(() => {
+    if (allMessages.length) {
+      // Use setTimeout to ensure this happens after the DOM is updated
+      setTimeout(() => {
+        if (messageContainerRef.current) {
+          messageContainerRef.current.scrollTop =
+            messageContainerRef.current.scrollHeight
+        }
+      }, 100)
+    }
+  }, [allMessages.length])
+
+  // Fetch remix data if navigated from a post
   useEffect(() => {
     const remixSourcePostId = searchParams.get('remixSourcePostId')
-
     if (
       remixSourcePostId &&
       jamIdFromParams === 'new' &&
       !initialPublishData &&
       !isInitializing
     ) {
-      // Condition based on jamId from params being 'new'
-      const fetchCloneData = async () => {
-        try {
-          // Do not show toast.info here as useJamSession will show 'New Jam session started!'
-          const data = await getPostCloneInfo(remixSourcePostId)
-          setInitialPublishData(data)
-          // Optionally pre-fill parts of the prompt or trigger a first message based on this data?
-          // For now, just storing for PublishSheet.
-          if (data) toast.success('Original vibe data loaded for remixing.')
-        } catch (error) {
-          console.error('Failed to fetch clone info for remix:', error)
-          toast.error(
-            `Could not load data from original vibe: ${
-              (error as Error).message
-            }`,
-          )
-          // Potentially redirect or clear remixSourcePostId if fetching fails critically
-          // router.replace(`/jam/${jamIdFromParams}`, undefined); // Clear query param example
-        }
-      }
-      fetchCloneData()
+      getPostCloneInfo(remixSourcePostId)
+        .then(setInitialPublishData)
+        .catch((err) => console.error('Failed to fetch remix data:', err))
     }
   }, [jamIdFromParams, searchParams, initialPublishData, isInitializing])
 
-  // Display only the last N messages
-  const displayMessages = useMemo(() => {
-    return allMessages.slice(-CHAT_HISTORY_LENGTH)
-  }, [allMessages])
-
-  // Display a user-friendly error if messagesError (from hook) exists
+  // Log message errors without displaying toasts
   useEffect(() => {
-    if (messagesError) {
+    if (messagesError)
       console.error('Error fetching messages:', messagesError.message)
-      toast.error(`Failed to load messages: ${messagesError.message}`)
-    }
   }, [messagesError])
 
-  // Ref for last optimistic message ID (potentially remove if hook handles all optimistic UI)
-  // const lastTempUserMessageIdRef = useRef<string | number | null>(null) // useJamSession handles this
+  // Display only the most recent messages
+  const displayMessages = useMemo(
+    () => allMessages.slice(-CHAT_HISTORY_LENGTH),
+    [allMessages],
+  )
 
+  // Filter selected images for publication
+  const imagesToPublish = useMemo(
+    () => jamGeneratedImages.filter((img) => selectedImageIds.has(img.id)),
+    [jamGeneratedImages, selectedImageIds],
+  )
+
+  // Sort images from newest to oldest
+  const sortedImages = useMemo(() => {
+    return [...jamGeneratedImages].reverse()
+  }, [jamGeneratedImages])
+
+  // Handler functions
   const handleSubmitPrompt = (promptText: string) => {
-    if (!resolvedJamId || isInitializing) {
-      toast.error('Jam session is not ready yet. Please wait.')
-      return
-    }
-    const payload: GenerateImagePayload = {
-      prompt: promptText,
-      modelProvider: 'openai', // Hardcoded for now
-      modelId: 'dall-e-3', // Hardcoded for now
-      size: selectedSize,
-    }
-    submitPrompt(payload) // submitPrompt is from useJamSession
-  }
+    if (!resolvedJamId || isInitializing || !selectedModel) return
 
-  // --- Image Selection Handler --- //
-  const handleImageSelect = (imageId: number) => {
-    setSelectedImageIds((prevSelectedIds) => {
-      const newSelectedIds = new Set(prevSelectedIds)
-      if (newSelectedIds.has(imageId)) {
-        newSelectedIds.delete(imageId)
-      } else {
-        newSelectedIds.add(imageId)
-      }
-      return newSelectedIds
+    submitPrompt({
+      prompt: promptText,
+      modelProvider: selectedModel.provider,
+      modelId: selectedModel.value,
+      size: selectedSize,
     })
   }
 
-  // --- Lightbox Image Activation Handler ---
-  const handleImageActivate = (image: MessageImage) => {
-    setLightboxImage(image)
-    setLightboxOpen(true)
+  const handleImageSelect = (imageId: number) => {
+    setSelectedImageIds((prev) => {
+      const newSet = new Set(prev)
+      newSet.has(imageId) ? newSet.delete(imageId) : newSet.add(imageId)
+      return newSet
+    })
   }
 
-  // --- Size Change Handler --- //
-  const handleSizeChange = (newSize: ImageSize) => {
-    setSelectedSize(newSize)
-    toast.info(`Image size set to ${newSize}`)
-  }
-
-  // --- Data for PublishSheet --- //
-  const imagesToPublish = useMemo(() => {
-    // Use jamGeneratedImages from the hook
-    return jamGeneratedImages.filter((img: MessageImage) =>
-      selectedImageIds.has(img.id),
-    )
-  }, [jamGeneratedImages, selectedImageIds])
-
-  // --- PublishSheet Handlers --- //
-  const handleOpenPublishSheet = () => {
-    if (imagesToPublish.length > 0) {
-      setIsPublishSheetOpen(true)
-    } else {
-      toast.error('Please select at least one image to publish.')
+  const handleImageClick = (image: MessageImage) => {
+    setActivatedImage(image)
+    setShowImagePanel(true)
+    // Pre-select the activated image if it's not already selected
+    if (!selectedImageIds.has(image.id)) {
+      handleImageSelect(image.id)
     }
   }
 
-  // --- Publish Post Mutation --- //
+  const handleClosePanel = () => {
+    setShowImagePanel(false)
+  }
+
+  const handlePublish = () => {
+    if (imagesToPublish.length > 0) {
+      setIsPublishSheetOpen(true)
+    }
+  }
+
+  const handleSaveToGallery = () => {
+    // TODO: Implement save to gallery functionality
+    console.log('Save to gallery:', Array.from(selectedImageIds))
+  }
+
+  // Publish post mutation
   const { mutate: publishPost, isPending: isPublishingPost } = useMutation<
     { postId: number },
     ApiError,
     Omit<CreatePostPayload, 'imageIds' | 'jamId'>
   >({
     mutationFn: async (formData) => {
-      if (!resolvedJamId) {
-        toast.error('Jam session ID not available. Cannot publish.')
-        throw new Error('Jam ID not resolved for publishing')
-      }
+      if (!resolvedJamId) throw new Error('Jam ID not resolved for publishing')
+
       const payload: CreatePostPayload = {
         ...formData,
         imageIds: Array.from(selectedImageIds),
-        jamId: Number.parseInt(resolvedJamId, 10), // Use resolvedJamId
+        jamId: Number.parseInt(resolvedJamId, 10),
       }
-      // Add remix fields if initialPublishData exists (from a remix operation)
+
+      // Add remix metadata if available
       if (initialPublishData) {
         payload.parentPostId = initialPublishData.parentPostId
         payload.rootPostId = initialPublishData.rootPostId
         payload.generation = initialPublishData.generation
       }
 
-      // imagesToPublish is already derived from jamGeneratedImages
-      if (imagesToPublish.length === 0 && payload.imageIds.length > 0) {
-        console.warn(
-          'Selected image IDs not found in current generatedImages state during publish.',
-        )
-      }
       return createPost(payload)
     },
     onSuccess: (data) => {
-      toast.success(`Vibe published successfully! Post ID: ${data.postId}`)
       setIsPublishSheetOpen(false)
-      setSelectedImageIds(new Set()) // Clear selection
+      setSelectedImageIds(new Set())
       queryClient.invalidateQueries({ queryKey: ['feed', 'latest'] })
-      if (resolvedJamId) {
-        queryClient.invalidateQueries({
-          queryKey: ['jamMessages', resolvedJamId],
-        }) // Invalidate jam messages
-      }
-      router.push(`/posts/${data.postId}`) // Redirect to post detail page
+      router.push(`/posts/${data.postId}`)
     },
-    onError: (error) => {
-      console.error('Error publishing post:', error)
-      toast.error(`Failed to publish: ${error.message}`)
-    },
+    onError: (error) => console.error('Error publishing post:', error),
   })
 
+  // Loading state
   if (isInitializing && !resolvedJamId) {
     return (
       <ProtectedPage>
@@ -233,6 +210,7 @@ export default function JamPage() {
     )
   }
 
+  // Error state
   if (!isInitializing && !resolvedJamId) {
     return (
       <ProtectedPage>
@@ -243,7 +221,11 @@ export default function JamPage() {
             We couldn't start or load your Jam session. Please try returning to
             the homepage and starting a new Jam.
           </p>
-          <Button onClick={() => router.push('/')} size="lg">
+          <Button
+            onClick={() => router.push('/')}
+            size="lg"
+            className="rounded-full"
+          >
             Go to Homepage
           </Button>
         </div>
@@ -253,97 +235,110 @@ export default function JamPage() {
 
   return (
     <ProtectedPage>
-      <div className="flex flex-col h-screen w-full">
-        {/* Completely flat header with no shadow or border */}
-        <header className="w-full p-4 flex items-center justify-between bg-background z-10">
+      <div className="flex flex-col h-screen w-full overflow-hidden bg-gradient-to-b from-background to-background/90">
+        {/* Header - fixed at top */}
+        <header className="px-6 py-4 flex items-center justify-between bg-background/80 backdrop-blur-sm z-10 flex-shrink-0">
           <div className="flex items-center">
             <Button
               variant="ghost"
               size="icon"
-              className="rounded-full"
+              className="rounded-full hover:bg-accent/50 mr-2 transition-colors"
               onClick={() => router.push('/')}
             >
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <h1 className="text-xl font-semibold ml-2">Art Jam</h1>
+            <h1 className="text-xl font-semibold">Art Jam</h1>
           </div>
-          <div className="flex items-center space-x-2">
-            <div className="text-sm rounded-full text-muted-foreground">
-              {selectedSize}
-            </div>
+          <div className="flex items-center gap-2">
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="rounded-full px-3 gap-2 text-sm font-medium border-accent/30 hover:bg-accent/30 transition-colors"
+            >
+              <a
+                href="https://forms.gle/your-feedback-form-link" // TODO: Replace with your actual feedback form link
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <MessageCircle className="h-4 w-4" />
+                Feedback
+              </a>
+            </Button>
           </div>
         </header>
 
-        {/* Main content area with fixed height */}
-        <div className="flex-1 flex flex-col">
-          {/* Message area (scrollable) */}
-          <div className="flex-1 overflow-y-auto px-4">
-            {displayMessages.length === 0 && !isLoadingMessages ? (
-              <div className="flex flex-col items-center justify-center h-full p-6 text-center">
-                <Paintbrush className="h-10 w-10 text-primary mb-4" />
-                <h3 className="text-xl font-medium mb-2">
-                  Start creating art with AI
-                </h3>
-                <p className="text-muted-foreground max-w-md mb-6">
-                  Describe the artwork you'd like to create in the input below.
-                  Be as descriptive as possible for the best results. This is an
-                  art generation tool, not just a chat.
-                </p>
-                <div className="max-w-md text-sm italic">
-                  Try: "A vibrant watercolor painting of a coastal village at
-                  sunset, with colorful boats in the harbor"
-                </div>
-              </div>
-            ) : (
-              <MessageList
-                messages={displayMessages}
-                isLoading={isGenerating}
-              />
+        {/* Main content - left chat, right images */}
+        <div className="flex-1 flex min-h-0 transition-all duration-300 ease-out">
+          {/* Left side - Chat area */}
+          <div
+            className={cn(
+              'flex-1 flex flex-col min-h-0 transition-all duration-300',
+              showImagePanel ? 'max-w-[65%]' : 'w-full',
             )}
+          >
+            {/* Message area - this should scroll independently */}
+            <div
+              className="flex-1 overflow-y-auto min-h-0 px-2"
+              ref={messageContainerRef}
+            >
+              {displayMessages.length === 0 && !isLoadingMessages ? (
+                <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+                  <div className="w-16 h-16 rounded-full bg-accent/30 flex items-center justify-center mb-4">
+                    <Paintbrush className="h-8 w-8 text-primary" />
+                  </div>
+                  <h3 className="text-xl font-medium mb-2">
+                    Start creating art with AI
+                  </h3>
+                  <p className="text-muted-foreground max-w-md mb-6">
+                    Describe the artwork you'd like to create in the input
+                    below. Be as descriptive as possible for the best results.
+                  </p>
+                  <div className="max-w-md text-sm italic bg-accent/30 px-4 py-3 rounded-xl">
+                    Try: "A vibrant watercolor painting of a coastal village at
+                    sunset, with colorful boats in the harbor"
+                  </div>
+                </div>
+              ) : (
+                <MessageList
+                  messages={displayMessages}
+                  isLoading={isGenerating}
+                  onImageClick={handleImageClick}
+                  isPanelOpen={showImagePanel}
+                />
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Chat input - fixed at bottom */}
+            <div className="mt-auto py-4 px-6 flex-shrink-0 bg-gradient-to-t from-background/90 to-transparent pt-8">
+              <ChatInput
+                onSubmit={handleSubmitPrompt}
+                onModelChange={setSelectedModel}
+                currentModelId={selectedModel?.value ?? null}
+                isLoading={isGenerating}
+                selectedSize={selectedSize}
+                onSizeChange={setSelectedSize}
+                jamId={resolvedJamId}
+              />
+            </div>
           </div>
 
-          {/* ImageStrip (if there are images to display) */}
-          {jamGeneratedImages.length > 0 && (
-            <div className="w-full py-2">
-              <ImageStrip
-                images={jamGeneratedImages}
+          {/* Right side - Image panel */}
+          {showImagePanel && (
+            <div className="w-[350px] md:w-[450px] xl:w-[500px] transition-all duration-300 ease-in-out">
+              <ImagePanel
+                images={sortedImages}
+                selectedImage={activatedImage}
                 selectedImageIds={selectedImageIds}
                 onImageSelect={handleImageSelect}
-                onImageActivate={handleImageActivate}
+                onSave={handleSaveToGallery}
+                onPublish={handlePublish}
+                onClose={handleClosePanel}
               />
             </div>
           )}
-
-          {/* Fixed ActionBar (if there are selected images) */}
-          {selectedImageIds.size > 0 && (
-            <div className="w-full py-2 px-4">
-              <ActionBar
-                selectedCount={selectedImageIds.size}
-                onSave={() => toast.info('Save functionality - Coming soon')}
-                onPublish={handleOpenPublishSheet}
-              />
-            </div>
-          )}
-
-          {/* Fixed ChatInput at bottom */}
-          <div className="w-full mt-auto py-3 px-4">
-            <ChatInput
-              onSubmit={handleSubmitPrompt}
-              isLoading={isGenerating}
-              selectedSize={selectedSize}
-              onSizeChange={handleSizeChange}
-              jamId={resolvedJamId}
-            />
-          </div>
         </div>
-
-        {/* Lightbox for viewing images */}
-        <ImageLightbox
-          isOpen={lightboxOpen}
-          onOpenChange={setLightboxOpen}
-          imageUrl={lightboxImage?.url}
-          altText={`Generated image ${lightboxImage?.id ?? ''}`}
-        />
 
         {/* Publish sheet */}
         <PublishSheet

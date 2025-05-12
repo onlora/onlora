@@ -14,13 +14,14 @@ import {
   type AIModelData as ApiAIModelData,
   getGenerationModels,
 } from '@/lib/api/modelApi'
+import { cn } from '@/lib/utils'
 import { useQuery } from '@tanstack/react-query'
 import {
   BrainCircuit,
-  Image,
   LayoutGrid,
   SendHorizontal,
-  Sliders,
+  Settings,
+  SquareIcon,
 } from 'lucide-react'
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
@@ -28,7 +29,6 @@ import { useEffect, useRef, useState } from 'react'
 // Define possible image sizes
 type ImageSize = '512x512' | '768x768' | '1024x1024'
 type AspectRatio = '1:1' | '2:3' | '4:3' | '9:16' | '16:9'
-type AIModel = string
 
 interface ChatInputProps {
   onSubmit: (message: string) => void
@@ -36,8 +36,8 @@ interface ChatInputProps {
   selectedSize: ImageSize
   onSizeChange: (size: ImageSize) => void
   jamId: string | null
-  selectedModel?: AIModel
-  onModelChange?: (model: AIModel) => void
+  currentModelId?: string | null
+  onModelChange?: (model: ApiAIModelData | null) => void
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -46,14 +46,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   selectedSize,
   onSizeChange,
   jamId,
-  selectedModel = '',
+  currentModelId: currentModelIdFromProp = null,
   onModelChange,
 }) => {
   const [inputValue, setInputValue] = useState('')
-  const [showRatioSelector, setShowRatioSelector] = useState(false)
-  const [currentModel, setCurrentModel] = useState<AIModel>(selectedModel || '')
+  const [currentModel, setCurrentModel] = useState<ApiAIModelData | null>(null)
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const {
@@ -73,50 +71,84 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   useEffect(() => {
     if (modelsLoading || !availableModels) return
 
-    let modelToSet: AIModel = ''
+    let modelToSet: ApiAIModelData | null = null
+    let modelSource = 'init' // For debugging: init, prop, current, default
 
     if (availableModels.length > 0) {
-      const selectedModelInList =
-        selectedModel && availableModels.find((m) => m.value === selectedModel)
-      const currentModelInList =
-        currentModel && availableModels.find((m) => m.value === currentModel)
+      const firstAvailableModel = availableModels[0]
 
-      if (selectedModel && selectedModelInList) {
-        modelToSet = selectedModel
-      } else if (currentModelInList) {
-        modelToSet = currentModel
+      const propModelInList =
+        currentModelIdFromProp &&
+        availableModels.find((m) => m.value === currentModelIdFromProp)
+
+      if (currentModelIdFromProp && propModelInList) {
+        modelToSet = propModelInList
+        modelSource = 'prop_valid'
+      } else if (currentModelIdFromProp && !propModelInList) {
+        modelToSet = firstAvailableModel
+        modelSource = 'prop_invalid_defaulting'
+        console.warn(
+          `ChatInput: currentModelId prop "${currentModelIdFromProp}" is not in available API models. Defaulting to "${firstAvailableModel.value}".`,
+        )
       } else {
-        modelToSet = availableModels[0].value
+        const currentModelStillInList =
+          currentModel &&
+          availableModels.find((m) => m.value === currentModel.value)
+
+        if (currentModelStillInList) {
+          modelToSet = currentModel
+          modelSource = 'current_valid'
+        } else {
+          modelToSet = firstAvailableModel
+          modelSource = 'default_to_first'
+        }
       }
     } else {
-      modelToSet = ''
+      modelToSet = null
+      modelSource = 'no_models_from_api'
     }
 
-    if (modelToSet !== currentModel) {
+    if (modelToSet?.value !== currentModel?.value) {
       setCurrentModel(modelToSet)
-    }
-    if (onModelChange && modelToSet !== selectedModel) {
+      if (onModelChange) {
+        onModelChange(modelToSet)
+      }
+    } else if (
+      onModelChange &&
+      modelToSet?.value !== currentModelIdFromProp &&
+      modelSource !== 'prop_valid'
+    ) {
       onModelChange(modelToSet)
     }
   }, [
     availableModels,
-    selectedModel,
+    currentModelIdFromProp,
     modelsLoading,
     onModelChange,
     currentModel,
   ])
 
   useEffect(() => {
-    if (selectedModel && selectedModel !== currentModel) {
-      if (availableModels.some((m) => m.value === selectedModel)) {
-        setCurrentModel(selectedModel)
-      } else if (availableModels.length > 0 && !modelsLoading) {
+    if (modelsLoading || !availableModels || availableModels.length === 0)
+      return
+
+    if (
+      currentModelIdFromProp &&
+      currentModelIdFromProp !== currentModel?.value
+    ) {
+      const newModelFromProp = availableModels.find(
+        (m) => m.value === currentModelIdFromProp,
+      )
+      if (newModelFromProp) {
+        setCurrentModel(newModelFromProp)
+      } else {
         console.warn(
-          `selectedModel prop "${selectedModel}" is not currently available.`,
+          `ChatInput (Prop Sync Effect): currentModelIdFromProp "${currentModelIdFromProp}" changed but is not in available API models. Main effect should handle defaulting.`,
         )
       }
+    } else if (!currentModelIdFromProp && currentModel !== null) {
     }
-  }, [selectedModel, availableModels, currentModel, modelsLoading])
+  }, [currentModelIdFromProp, currentModel, availableModels, modelsLoading])
 
   useEffect(() => {
     const textarea = textareaRef.current
@@ -162,191 +194,159 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
   }
 
-  const handleFileUpload = () => {
-    if (fileInputRef.current) {
-      fileInputRef.current.click()
-    }
-  }
-
-  const handleModelChange = (modelValue: AIModel) => {
-    setCurrentModel(modelValue)
+  const handleModelChangeInternal = (modelValueId: string) => {
+    const selectedFullModel =
+      availableModels.find((m) => m.value === modelValueId) || null
+    setCurrentModel(selectedFullModel)
     if (onModelChange) {
-      onModelChange(modelValue)
+      onModelChange(selectedFullModel)
     }
   }
 
-  const aspectRatios: {
-    value: AspectRatio
-    label: string
-    description: string
-  }[] = [
-    { value: '1:1', label: '1:1', description: 'Square, Profile' },
-    { value: '2:3', label: '2:3', description: 'Social Media, Selfie' },
-    { value: '4:3', label: '4:3', description: 'Article, Painting' },
-    { value: '9:16', label: '9:16', description: 'Mobile Wallpaper, Portrait' },
+  // Size option mapping for displaying in dropdown
+  const sizeOptions = [
     {
-      value: '16:9',
-      label: '16:9',
-      description: 'Desktop Wallpaper, Landscape',
+      value: '512x512',
+      label: '512×512',
+      icon: <SquareIcon className="h-3.5 w-3.5" />,
+    },
+    {
+      value: '768x768',
+      label: '768×768',
+      icon: <SquareIcon className="h-4 w-4" />,
+    },
+    {
+      value: '1024x1024',
+      label: '1024×1024',
+      icon: <SquareIcon className="h-4.5 w-4.5" />,
     },
   ]
 
+  // Get the current size option
+  const currentSizeOption =
+    sizeOptions.find((option) => option.value === selectedSize) ||
+    sizeOptions[2]
+
   return (
-    <div className="p-4 bg-background flex-shrink-0 z-10">
+    <div className="flex-shrink-0 z-10">
       <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
-        <div className="relative w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm">
-          <textarea
-            ref={textareaRef}
-            placeholder="Describe your image, characters, emotions, scene, style..."
-            value={inputValue}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            disabled={isSubmitting}
-            rows={1}
-            className="w-full outline-none bg-transparent resize-none text-zinc-800 placeholder-zinc-400 min-h-[24px] max-h-[200px] overflow-y-auto"
-            autoComplete="off"
-          />
+        <div className="relative w-full rounded-xl bg-accent/20 shadow-sm">
+          <div className="flex items-center px-4 py-2 border-b border-accent/10">
+            {/* Model selector */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-2 text-sm text-foreground/70 rounded-full hover:bg-accent/40"
+                >
+                  <BrainCircuit className="h-3.5 w-3.5" />
+                  <span className="max-w-[120px] truncate">
+                    {currentModel?.label || 'Select model'}
+                  </span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel>AI Model</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={currentModel?.value || ''}
+                  onValueChange={handleModelChangeInternal}
+                >
+                  {availableModels.map((model) => (
+                    <DropdownMenuRadioItem
+                      key={model.value}
+                      value={model.value}
+                      disabled={modelsLoading}
+                    >
+                      {model.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-          {showRatioSelector && (
-            <div className="absolute bottom-14 left-0 bg-white rounded-xl shadow-lg border border-zinc-200 p-1 z-10 w-64 overflow-hidden">
-              <div className="text-sm font-medium text-zinc-800 p-2 border-b border-zinc-100">
-                Aspect Ratio
-              </div>
-              <div className="py-1">
-                {aspectRatios.map((ratio) => (
-                  <button
-                    key={ratio.value}
-                    type="button"
-                    className="flex w-full items-center px-3 py-2 hover:bg-zinc-50 text-left bg-transparent border-0 transition-colors"
-                    onClick={() => {
-                      setShowRatioSelector(false)
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        id={`ratio-${ratio.value}`}
-                        name="aspect-ratio"
-                        className="h-4 w-4 text-primary border-zinc-300"
-                      />
-                      <label
-                        htmlFor={`ratio-${ratio.value}`}
-                        className="text-sm font-medium text-zinc-700"
-                      >
-                        {ratio.label}
-                      </label>
-                    </div>
-                    <div className="text-xs text-zinc-500 ml-6">
-                      {ratio.description}
-                    </div>
-                  </button>
-                ))}
-              </div>
+            <div className="mx-2 h-4 border-r border-accent/20" />
+
+            {/* Size selector */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-2 text-sm text-foreground/70 rounded-full hover:bg-accent/40"
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  <span>{currentSizeOption.label}</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuLabel>Image Size</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={selectedSize}
+                  onValueChange={(value) => onSizeChange(value as ImageSize)}
+                >
+                  {sizeOptions.map((option) => (
+                    <DropdownMenuRadioItem
+                      key={option.value}
+                      value={option.value}
+                      className="flex items-center"
+                    >
+                      <span className="mr-2">{option.icon}</span>
+                      {option.label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="ml-auto">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 rounded-full hover:bg-accent/40"
+              >
+                <Settings className="h-3.5 w-3.5 text-foreground/70" />
+              </Button>
             </div>
-          )}
+          </div>
 
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              console.log('File selected:', e.target.files?.[0]?.name)
-            }}
-          />
+          <div className="px-4 py-3 flex">
+            <textarea
+              ref={textareaRef}
+              placeholder="Describe your image, characters, emotions, scene, style..."
+              value={inputValue}
+              onChange={handleInputChange}
+              onKeyDown={handleKeyDown}
+              disabled={isSubmitting}
+              rows={1}
+              className="w-full outline-none bg-transparent resize-none text-foreground placeholder-muted-foreground min-h-[24px] max-h-[200px] overflow-y-auto"
+              autoComplete="off"
+            />
+          </div>
 
-          <div className="flex justify-between items-center mt-2">
-            <div className="flex items-center space-x-2">
-              <button
-                type="button"
-                className="p-1.5 rounded text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700 transition-colors"
-                onClick={handleFileUpload}
-                aria-label="Add reference image"
-                title="Add reference image"
-              >
-                <Image className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                className="p-1.5 rounded text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700 transition-colors"
-                onClick={() => setShowRatioSelector(!showRatioSelector)}
-                aria-label="Change aspect ratio"
-                title="Change aspect ratio"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-
-              <button
-                type="button"
-                className="p-1.5 rounded text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700 transition-colors"
-                aria-label="Select style"
-                title="Select style"
-              >
-                <Sliders className="w-4 h-4" />
-              </button>
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center gap-1 h-auto p-1.5 text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
-                    disabled={modelsLoading}
-                  >
-                    <BrainCircuit className="w-4 h-4" />
-                    <span className="text-xs font-medium">
-                      {modelsLoading
-                        ? 'Loading...'
-                        : currentModel || 'Select Model'}
-                    </span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-64">
-                  <DropdownMenuLabel>Select AI Model</DropdownMenuLabel>
-                  {modelsError && (
-                    <div className="p-2 text-xs text-red-500">
-                      {modelsError}
-                    </div>
-                  )}
-                  {!modelsLoading &&
-                    !modelsError &&
-                    (!availableModels || availableModels.length === 0) && (
-                      <div className="p-2 text-xs text-zinc-500">
-                        No models available.
-                      </div>
-                    )}
-                  <DropdownMenuRadioGroup
-                    value={currentModel}
-                    onValueChange={handleModelChange}
-                  >
-                    {availableModels.map((model: ApiAIModelData) => (
-                      <DropdownMenuRadioItem
-                        key={model.value}
-                        value={model.value}
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-medium">{model.label}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {model.description}
-                          </span>
-                        </div>
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-
-            <button
+          <div className="px-4 py-2 flex justify-end border-t border-accent/10">
+            <Button
               type="submit"
-              disabled={isSubmitting || !inputValue.trim()}
-              className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              aria-label="Send message"
+              disabled={!inputValue.trim() || isSubmitting}
+              className={cn(
+                'rounded-full h-8 gap-1.5 px-4 transition-all',
+                !inputValue.trim() && 'opacity-70',
+              )}
+              size="sm"
             >
-              <SendHorizontal className="h-4 w-4" />
-              <span className="sr-only">Send</span>
-            </button>
+              {isSubmitting ? (
+                <div className="flex space-x-1">
+                  <div className="h-1.5 w-1.5 bg-primary-foreground/80 rounded-full animate-bounce" />
+                  <div className="h-1.5 w-1.5 bg-primary-foreground/80 rounded-full animate-bounce [animation-delay:150ms]" />
+                  <div className="h-1.5 w-1.5 bg-primary-foreground/80 rounded-full animate-bounce [animation-delay:300ms]" />
+                </div>
+              ) : (
+                <>
+                  <span>Generate</span>
+                  <SendHorizontal className="h-3.5 w-3.5" />
+                </>
+              )}
+            </Button>
           </div>
         </div>
       </form>

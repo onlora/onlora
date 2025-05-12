@@ -39,9 +39,19 @@ export interface GenerateImagePayload {
   size: string // e.g., "1024x1024"
 }
 
-// Type for the successful response (Task ID)
+// Type for the successful response from the generate endpoint
+// This now reflects the direct return of the (assistant's) message object
 export interface GenerateImageResponse {
-  taskId: string
+  id: number // Message ID
+  jamId: number // Jam ID (note: frontend Message type uses jam_id)
+  role: 'ai'
+  text: string | null
+  images: MessageImage[] | null // Array of image data objects
+  createdAt: string // ISO string (note: frontend Message type uses created_at)
+  // The backend also includes top-level imageUrl and altText for the first image
+  // which can be useful for direct display if the frontend chooses to use them.
+  imageUrl?: string
+  altText?: string
 }
 
 // ApiErrorResponse is now imported from apiClient.ts
