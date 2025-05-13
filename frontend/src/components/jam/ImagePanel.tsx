@@ -19,8 +19,8 @@ import { useState } from 'react'
 interface ImagePanelProps {
   images: MessageImage[]
   selectedImage: MessageImage | null
-  selectedImageIds: Set<number>
-  onImageSelect: (imageId: number) => void
+  selectedImageIds: Set<string>
+  onImageSelect: (imageId: string) => void
   onSave: () => void
   onPublish: () => void
   onClose?: () => void
@@ -118,7 +118,7 @@ export const ImagePanel = ({
 
               <Button
                 variant={
-                  selectedImageIds.has(focusedImage?.id || -1)
+                  selectedImageIds.has(focusedImage?.id || '')
                     ? 'default'
                     : 'outline'
                 }
@@ -126,7 +126,7 @@ export const ImagePanel = ({
                 className="h-8 rounded-full text-xs min-w-[80px]"
                 onClick={() => focusedImage && onImageSelect(focusedImage.id)}
               >
-                {selectedImageIds.has(focusedImage?.id || -1) ? (
+                {selectedImageIds.has(focusedImage?.id || '') ? (
                   <>
                     <CheckCircle className="h-3.5 w-3.5 mr-1" />
                     Selected

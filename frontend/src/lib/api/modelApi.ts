@@ -1,11 +1,5 @@
+import type { AIModelData } from '../../types/models'
 import { apiClient } from './apiClient'
-
-export interface AIModelData {
-  value: string
-  label: string
-  provider: 'google' | 'openai'
-  description: string
-}
 
 /**
  * Fetches the available AI generation models from the backend.

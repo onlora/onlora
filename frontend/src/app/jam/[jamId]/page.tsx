@@ -45,7 +45,7 @@ export default function JamPage() {
   // UI state
   const [initialPublishData, setInitialPublishData] =
     useState<PostCloneInfo | null>(null)
-  const [selectedImageIds, setSelectedImageIds] = useState<Set<number>>(
+  const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(
     new Set(),
   )
   const [selectedSize, setSelectedSize] = useState<ImageSize>('1024x1024')
@@ -263,10 +263,12 @@ export default function JamPage() {
       modelProvider: selectedModel.provider,
       modelId: selectedModel.value,
       size: selectedSize,
+      isMultiModalLanguageModel:
+        selectedModel.isMultiModalLanguageModel || false,
     })
   }
 
-  const handleImageSelect = (imageId: number) => {
+  const handleImageSelect = (imageId: string) => {
     setSelectedImageIds((prev) => {
       const newSet = new Set(prev)
       newSet.has(imageId) ? newSet.delete(imageId) : newSet.add(imageId)
@@ -350,7 +352,7 @@ export default function JamPage() {
       const payload: CreatePostPayload = {
         ...formData,
         imageIds: imageIds,
-        jamId: Number.parseInt(resolvedJamId, 10),
+        jamId: resolvedJamId,
         visibility: 'public', // Always public when publishing
       }
 

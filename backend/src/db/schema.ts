@@ -1,17 +1,15 @@
 import { relations } from 'drizzle-orm'
 import {
   type AnyPgColumn,
-  bigint,
-  bigserial,
   boolean,
   integer,
   jsonb,
   pgEnum,
   pgTable,
   primaryKey,
-  serial,
   text,
   timestamp,
+  uuid,
 } from 'drizzle-orm/pg-core'
 import { users } from './auth-schema'
 
@@ -30,7 +28,7 @@ export const notificationTypeEnum = pgEnum('notification_type_e', [
 ])
 
 export const jams = pgTable('jams', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey(),
   userId: text('user_id').references(() => users.id, {
     onDelete: 'set null',
   }),
@@ -38,8 +36,8 @@ export const jams = pgTable('jams', {
 })
 
 export const messages = pgTable('messages', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
-  jamId: bigint('jam_id', { mode: 'number' }).references(() => jams.id, {
+  id: uuid('id').defaultRandom().primaryKey(),
+  jamId: uuid('jam_id').references(() => jams.id, {
     onDelete: 'cascade',
   }),
   role: messageRoleEnum('role').notNull(),
@@ -49,8 +47,8 @@ export const messages = pgTable('messages', {
 })
 
 export const images = pgTable('images', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
-  jamId: bigint('jam_id', { mode: 'number' }).references(() => jams.id, {
+  id: uuid('id').defaultRandom().primaryKey(),
+  jamId: uuid('jam_id').references(() => jams.id, {
     onDelete: 'cascade',
   }),
   url: text('url').notNull(),
@@ -65,7 +63,7 @@ export const images = pgTable('images', {
 })
 
 export const jamSessions = pgTable('jam_sessions', {
-  id: serial('id').primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey(),
   userId: text('user_id')
     .references(() => users.id, { onDelete: 'cascade' })
     .notNull(),
@@ -76,7 +74,7 @@ export const jamSessions = pgTable('jam_sessions', {
 })
 
 export const posts = pgTable('posts', {
-  id: serial('id').primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey(),
   authorId: text('author_id').references(() => users.id, {
     onDelete: 'set null',
   }), // Can be null if author deletes account
@@ -85,7 +83,7 @@ export const posts = pgTable('posts', {
   tags: text('tags').array(), // Array of strings for tags
   visibility: visibilityEnum('visibility').default('public'),
   coverImg: text('cover_img'),
-  jamSessionId: integer('jam_session_id').references(() => jamSessions.id, {
+  jamSessionId: uuid('jam_session_id').references(() => jamSessions.id, {
     onDelete: 'set null',
   }), // Optional link to original jam session
   likeCount: integer('like_count').default(0).notNull(),
@@ -93,11 +91,10 @@ export const posts = pgTable('posts', {
   remixCount: integer('remix_count').default(0).notNull(),
   viewCount: integer('view_count').default(0).notNull(),
   bookmarkCount: integer('bookmark_count').default(0).notNull(),
-  parentPostId: integer('parent_post_id').references(
-    (): AnyPgColumn => posts.id,
-    { onDelete: 'cascade' },
-  ),
-  rootPostId: integer('root_post_id').references((): AnyPgColumn => posts.id, {
+  parentPostId: uuid('parent_post_id').references((): AnyPgColumn => posts.id, {
+    onDelete: 'cascade',
+  }),
+  rootPostId: uuid('root_post_id').references((): AnyPgColumn => posts.id, {
     onDelete: 'cascade',
   }),
   generation: integer('generation').default(0),
@@ -127,7 +124,7 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
 export const likes = pgTable(
   'likes',
   {
-    postId: bigint('post_id', { mode: 'number' })
+    postId: uuid('post_id')
       .notNull()
       .references(() => posts.id, { onDelete: 'cascade' }),
     userId: text('user_id')
@@ -154,14 +151,14 @@ export const likesRelations = relations(likes, ({ one }) => ({
 }))
 
 export const comments = pgTable('comments', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
-  postId: bigint('post_id', { mode: 'number' })
+  id: uuid('id').defaultRandom().primaryKey(),
+  postId: uuid('post_id')
     .notNull()
     .references(() => posts.id, { onDelete: 'cascade' }),
   userId: text('user_id').references(() => users.id, {
     onDelete: 'set null',
   }),
-  parentId: bigint('parent_id', { mode: 'number' }),
+  parentId: uuid('parent_id'),
   body: text('body').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
@@ -186,13 +183,13 @@ export const commentsRelations = relations(comments, ({ one, many }) => ({
 }))
 
 export const veTxns = pgTable('ve_txns', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey(),
   userId: text('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
   delta: integer('delta'),
   reason: text('reason'),
-  refId: bigint('ref_id', { mode: 'number' }),
+  refId: uuid('ref_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
@@ -266,7 +263,7 @@ export const follows = pgTable(
 )
 
 export const notifications = pgTable('notifications', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  id: uuid('id').defaultRandom().primaryKey(),
   recipientId: text('recipient_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
@@ -274,15 +271,12 @@ export const notifications = pgTable('notifications', {
     onDelete: 'cascade',
   }), // User who triggered the notification (e.g., liker, commenter, follower)
   type: notificationTypeEnum('type').notNull(),
-  postId: integer('post_id').references(() => posts.id, {
+  postId: uuid('post_id').references(() => posts.id, {
     onDelete: 'cascade',
   }), // Nullable, relevant for like, comment, reply, remix
-  commentId: bigint('comment_id', { mode: 'number' }).references(
-    () => comments.id,
-    {
-      onDelete: 'cascade',
-    },
-  ), // Nullable, relevant for reply
+  commentId: uuid('comment_id').references(() => comments.id, {
+    onDelete: 'cascade',
+  }), // Nullable, relevant for reply
   isRead: boolean('is_read').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
@@ -325,11 +319,11 @@ export const notificationsRelations = relations(notifications, ({ one }) => ({
 
 // Table to link Posts with their Images (Many-to-Many)
 export const postImages = pgTable('post_images', {
-  id: bigserial('id', { mode: 'number' }).primaryKey(),
-  postId: bigint('post_id', { mode: 'number' })
+  id: uuid('id').defaultRandom().primaryKey(),
+  postId: uuid('post_id')
     .notNull()
     .references(() => posts.id, { onDelete: 'cascade' }),
-  imageId: bigint('image_id', { mode: 'number' })
+  imageId: uuid('image_id')
     .notNull()
     .references(() => images.id, { onDelete: 'cascade' }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -358,7 +352,7 @@ export const jamSessionsRelations = relations(jamSessions, ({ one, many }) => ({
 export const bookmarks = pgTable(
   'bookmarks',
   {
-    postId: bigint('post_id', { mode: 'number' })
+    postId: uuid('post_id')
       .notNull()
       .references(() => posts.id, { onDelete: 'cascade' }),
     userId: text('user_id')

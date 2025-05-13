@@ -2,15 +2,17 @@
 
 import type { ApiError } from '@/lib/api/apiClient'
 import {
-  type CreateJamResponse,
-  type GenerateImagePayload,
-  type GenerateImageResponse,
-  type Message,
-  type MessageImage,
-  createJam,
-  generateImageForJam,
+  createJamSession,
+  generateImage,
   getJamMessages,
 } from '@/lib/api/jamApi'
+import type {
+  GenerateImageParams,
+  GenerationResponse,
+  Message,
+  MessageImage,
+} from '@/types/images'
+import type { ModelProvider } from '@/types/models'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -21,51 +23,61 @@ interface OptimisticMessage extends Message {
   isLoading?: boolean
 }
 
+export interface SubmitPromptParams {
+  prompt: string
+  modelProvider: ModelProvider
+  modelId: string
+  size?: string
+  aspectRatio?: string
+  isMultiModalLanguageModel?: boolean
+}
+
 export interface UseJamSessionReturn {
-  messages: Message[] // Will actually be OptimisticMessage[] internally at times
+  messages: Message[]
   isGenerating: boolean
-  generationProgress: number | null
   generatedImages: MessageImage[]
-  submitPrompt: (payload: GenerateImagePayload) => void
+  submitPrompt: (params: SubmitPromptParams) => void
   isLoadingMessages: boolean
   messagesError: Error | null
   resolvedJamId: string | null
   isInitializing: boolean
 }
 
-export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
+export function useJamSession(
+  initialJamId?: string | null,
+): UseJamSessionReturn {
   const queryClient = useQueryClient()
   const router = useRouter()
   const [resolvedJamId, setResolvedJamId] = useState<string | null>(
-    initialJamIdParam === 'new' ? null : initialJamIdParam,
+    initialJamId === 'new' ? null : initialJamId || null,
   )
   const [isInitializing, setIsInitializing] = useState<boolean>(
-    initialJamIdParam === 'new',
+    initialJamId === 'new',
   )
 
   const [optimisticMessages, setOptimisticMessages] = useState<
     OptimisticMessage[]
   >([])
   const [generatedImages, setGeneratedImages] = useState<MessageImage[]>([])
-  const lastTempUserMessageIdRef = useRef<string | number | null>(null)
+  const lastTempIdRef = useRef<string | null>(null)
+  const hasOptimisticUpdatesRef = useRef<boolean>(false)
 
-  // Flag to track if we've applied optimistic updates that need to be cleaned up
-  const hasAppliedOptimisticUpdate = useRef<boolean>(false)
-
+  // Create new jam session
   const { mutate: createJamMutation, isPending: isCreatingJam } = useMutation<
-    CreateJamResponse,
+    { jamId: string },
     ApiError
   >({
-    mutationFn: createJam,
+    mutationFn: createJamSession,
     onSuccess: (data) => {
-      const newJamIdStr = String(data.jamId)
-      setResolvedJamId(newJamIdStr)
+      setResolvedJamId(data.jamId)
       toast.success('New Jam session started!')
+
+      // Update URL
       const currentPath = window.location.pathname.substring(
         0,
         window.location.pathname.lastIndexOf('/'),
       )
-      const newUrl = `${currentPath}/${newJamIdStr}${window.location.search}`
+      const newUrl = `${currentPath}/${data.jamId}${window.location.search}`
       router.replace(newUrl)
       setIsInitializing(false)
     },
@@ -76,27 +88,27 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
     },
   })
 
-  // Initialize new Jam session if needed
+  // Initialize new jam if needed
   useEffect(() => {
     if (
-      initialJamIdParam === 'new' &&
+      initialJamId === 'new' &&
       !resolvedJamId &&
       !isCreatingJam &&
       isInitializing
     ) {
       createJamMutation()
-    } else if (initialJamIdParam !== 'new') {
+    } else if (initialJamId !== 'new') {
       setIsInitializing(false)
     }
   }, [
-    initialJamIdParam,
+    initialJamId,
     resolvedJamId,
     createJamMutation,
     isCreatingJam,
     isInitializing,
   ])
 
-  // Fetch messages query with optimized settings
+  // Fetch messages
   const {
     data: fetchedMessages,
     isLoading: isLoadingInitialMessages,
@@ -108,11 +120,8 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
       return getJamMessages(resolvedJamId)
     },
     enabled: !!resolvedJamId && !isInitializing,
-    staleTime: 5 * 60 * 1000, // Keep data fresh for 5 minutes
+    staleTime: 5 * 60 * 1000, // 5 minutes
     refetchOnWindowFocus: false,
-    // Prevent excessive refetching
-    refetchOnMount: false,
-    refetchOnReconnect: false,
   })
 
   const isLoadingMessages = isLoadingInitialMessages || isInitializing
@@ -123,7 +132,7 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
     if (
       fetchedMessages &&
       fetchedMessages.length > 0 &&
-      hasAppliedOptimisticUpdate.current
+      hasOptimisticUpdatesRef.current
     ) {
       // Find the last AI message from server - likely our generated response
       const lastServerAiMessage = [...fetchedMessages]
@@ -131,17 +140,17 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
         .find((msg) => msg.role === 'ai')
 
       if (lastServerAiMessage) {
-        // Remove corresponding optimistic messages but keep other pending updates
+        // Remove corresponding optimistic messages
         setOptimisticMessages((prev) =>
           prev.filter(
             (msg) =>
-              msg.id !== lastTempUserMessageIdRef.current &&
-              msg.id !== `temp-ai-${lastTempUserMessageIdRef.current}`,
+              msg.id !== lastTempIdRef.current &&
+              msg.id !== `temp-ai-${lastTempIdRef.current}`,
           ),
         )
 
         // Reset flag
-        hasAppliedOptimisticUpdate.current = false
+        hasOptimisticUpdatesRef.current = false
       }
     }
 
@@ -153,24 +162,24 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
     return [...(fetchedMessages || []), ...finalOptimistic] as Message[]
   }, [fetchedMessages, optimisticMessages])
 
-  // Generate image mutation with cache management
+  // Generate image mutation
   const { mutate: generateImageMutation, isPending: isGeneratingImage } =
-    useMutation<GenerateImageResponse, ApiError, GenerateImagePayload>({
-      mutationFn: (payload) => {
+    useMutation<GenerationResponse, ApiError, GenerateImageParams>({
+      mutationFn: (params) => {
         if (!resolvedJamId) {
           toast.error('Jam session is not active.')
           throw new Error('Jam session not resolved for image generation.')
         }
-        return generateImageForJam(resolvedJamId, payload)
+        return generateImage(resolvedJamId, params)
       },
       onSuccess: (data) => {
+        // Create message from response
         const newAiMessage: Message = {
           id: data.id,
-          jam_id: data.jamId,
           role: 'ai',
           text: data.text,
           images: data.images,
-          created_at: data.createdAt,
+          createdAt: data.createdAt,
         }
 
         // Update cache directly instead of refetching
@@ -194,8 +203,8 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
         setOptimisticMessages((prev) => {
           return prev.filter(
             (msg) =>
-              msg.id !== lastTempUserMessageIdRef.current &&
-              msg.id !== `temp-ai-${lastTempUserMessageIdRef.current}`,
+              msg.id !== lastTempIdRef.current &&
+              msg.id !== `temp-ai-${lastTempIdRef.current}`,
           )
         })
 
@@ -212,25 +221,16 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
         setOptimisticMessages((prev) =>
           prev.filter(
             (msg) =>
-              msg.id !== lastTempUserMessageIdRef.current &&
-              msg.id !== `temp-ai-${lastTempUserMessageIdRef.current}`,
+              msg.id !== lastTempIdRef.current &&
+              msg.id !== `temp-ai-${lastTempIdRef.current}`,
           ),
         )
-      },
-      onSettled: () => {
-        // Mark queries as stale but don't trigger automatic refetch
-        if (resolvedJamId) {
-          queryClient.invalidateQueries({
-            queryKey: ['jamMessages', resolvedJamId],
-            refetchType: 'none',
-          })
-        }
       },
     })
 
   // Submit prompt with optimistic updates
   const submitPrompt = useCallback(
-    (payload: GenerateImagePayload) => {
+    (params: SubmitPromptParams) => {
       if (!resolvedJamId) {
         toast.error('Jam session is not active.')
         return
@@ -242,16 +242,14 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
 
       // Create unique ID for this message pair
       const tempUserMessageId = `temp-user-${Date.now()}`
-      lastTempUserMessageIdRef.current = tempUserMessageId
+      lastTempIdRef.current = tempUserMessageId
 
       // Create optimistic user message
       const userMessage: Message = {
         id: tempUserMessageId,
-        jam_id: Number(resolvedJamId),
         role: 'user',
-        text: payload.prompt,
-        created_at: new Date().toISOString(),
-        images: null,
+        text: params.prompt,
+        createdAt: new Date().toISOString(),
       }
 
       // Update cache with user message
@@ -267,11 +265,9 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
       const tempAiMessageId = `temp-ai-${tempUserMessageId}`
       const aiPlaceholderMessage: OptimisticMessage = {
         id: tempAiMessageId,
-        jam_id: Number(resolvedJamId),
         role: 'ai',
         text: 'Generating image...',
-        created_at: new Date().toISOString(),
-        images: null,
+        createdAt: new Date().toISOString(),
         isLoading: true,
       }
 
@@ -282,18 +278,53 @@ export function useJamSession(initialJamIdParam: string): UseJamSessionReturn {
       ])
 
       // Mark that we've applied optimistic updates
-      hasAppliedOptimisticUpdate.current = true
+      hasOptimisticUpdatesRef.current = true
+
+      // Build params for the API
+      const imageParams: GenerateImageParams = {
+        prompt: params.prompt,
+        modelProvider: params.modelProvider,
+        modelId: params.modelId,
+        isMultiModalLanguageModel: params.isMultiModalLanguageModel,
+      }
+
+      // Add size or aspect ratio
+      if (params.size) {
+        imageParams.size = params.size
+      } else if (params.aspectRatio) {
+        imageParams.aspectRatio = params.aspectRatio
+      }
+
+      // Add conversation context for multi-modal models
+      if (params.isMultiModalLanguageModel && fetchedMessages) {
+        // Convert recent messages to the format expected by the API
+        const recentMessages = fetchedMessages
+          .slice(-5) // Get last 5 messages for context
+          .map((msg) => ({
+            role: msg.role === 'user' ? 'user' : 'assistant',
+            content: msg.text || '',
+          }))
+
+        if (recentMessages.length > 0) {
+          imageParams.messages = recentMessages
+        }
+      }
 
       // Trigger generation
-      generateImageMutation(payload)
+      generateImageMutation(imageParams)
     },
-    [resolvedJamId, generateImageMutation, isGeneratingImage, queryClient],
+    [
+      resolvedJamId,
+      generateImageMutation,
+      isGeneratingImage,
+      queryClient,
+      fetchedMessages,
+    ],
   )
 
   return {
-    messages: messages as Message[],
+    messages,
     isGenerating: isGeneratingImage,
-    generationProgress: null,
     generatedImages,
     submitPrompt,
     isLoadingMessages,

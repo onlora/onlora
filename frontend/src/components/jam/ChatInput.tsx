@@ -10,11 +10,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import type { ApiError } from '@/lib/api/apiClient'
-import {
-  type AIModelData as ApiAIModelData,
-  getGenerationModels,
-} from '@/lib/api/modelApi'
+import { getGenerationModels } from '@/lib/api/modelApi'
 import { cn } from '@/lib/utils'
+import type { AIModelData, ImageSize } from '@/types/models'
 import { useQuery } from '@tanstack/react-query'
 import {
   BrainCircuit,
@@ -26,10 +24,6 @@ import {
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
 
-// Define possible image sizes
-type ImageSize = '512x512' | '768x768' | '1024x1024'
-type AspectRatio = '1:1' | '2:3' | '4:3' | '9:16' | '16:9'
-
 interface ChatInputProps {
   onSubmit: (message: string) => void
   isLoading?: boolean
@@ -37,7 +31,7 @@ interface ChatInputProps {
   onSizeChange: (size: ImageSize) => void
   jamId: string | null
   currentModelId?: string | null
-  onModelChange?: (model: ApiAIModelData | null) => void
+  onModelChange?: (model: AIModelData | null) => void
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -50,7 +44,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onModelChange,
 }) => {
   const [inputValue, setInputValue] = useState('')
-  const [currentModel, setCurrentModel] = useState<ApiAIModelData | null>(null)
+  const [currentModel, setCurrentModel] = useState<AIModelData | null>(null)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -58,7 +52,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     data: availableModels = [],
     isLoading: modelsLoading,
     error: modelsErrorData,
-  } = useQuery<ApiAIModelData[], Error>({
+  } = useQuery<AIModelData[], Error>({
     queryKey: ['generationModels'],
     queryFn: getGenerationModels,
     staleTime: 5 * 60 * 1000,
@@ -71,7 +65,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   useEffect(() => {
     if (modelsLoading || !availableModels) return
 
-    let modelToSet: ApiAIModelData | null = null
+    let modelToSet: AIModelData | null = null
     let modelSource = 'init' // For debugging: init, prop, current, default
 
     if (availableModels.length > 0) {
@@ -203,8 +197,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
   }
 
-  // Size option mapping for displaying in dropdown
-  const sizeOptions = [
+  // Default size options if model doesn't specify any
+  const defaultSizeOptions = [
     {
       value: '512x512',
       label: '512×512',
@@ -222,10 +216,75 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     },
   ]
 
-  // Get the current size option
-  const currentSizeOption =
-    sizeOptions.find((option) => option.value === selectedSize) ||
-    sizeOptions[2]
+  // Default aspect ratio options if model uses aspect ratios
+  const defaultAspectRatioOptions = [
+    {
+      value: '1:1',
+      label: '1:1 (Square)',
+      icon: <SquareIcon className="h-4 w-4" />,
+    },
+    {
+      value: '16:9',
+      label: '16:9 (Landscape)',
+      icon: <LayoutGrid className="h-4 w-4" />,
+    },
+    {
+      value: '9:16',
+      label: '9:16 (Portrait)',
+      icon: <LayoutGrid className="h-4 w-4 rotate-90" />,
+    },
+  ]
+
+  // Determine what options to show based on the selected model
+  const isUsingAspectRatio =
+    currentModel?.supportedAspectRatios &&
+    currentModel.supportedAspectRatios.length > 0
+
+  // Generate size options based on model's supported sizes if available
+  const sizeOptions = currentModel?.supportedSizes
+    ? currentModel.supportedSizes.map((size) => {
+        const [width, height] = size.split('x').map(Number)
+        const iconSize = Math.min(4.5, 3.5 + width / 1024)
+        return {
+          value: size,
+          label: size.replace('x', '×'),
+          icon: <SquareIcon className={`h-${iconSize} w-${iconSize}`} />,
+        }
+      })
+    : defaultSizeOptions
+
+  // Generate aspect ratio options based on model's supported aspect ratios if available
+  const aspectRatioOptions = currentModel?.supportedAspectRatios
+    ? currentModel.supportedAspectRatios.map((ratio) => {
+        const [width, height] = ratio.split(':').map(Number)
+        const isLandscape = width > height
+        const isPortrait = height > width
+        const isSquare = width === height
+
+        return {
+          value: ratio,
+          label: `${ratio} ${isSquare ? '(Square)' : isLandscape ? '(Landscape)' : '(Portrait)'}`,
+          icon: isSquare ? (
+            <SquareIcon className="h-4 w-4" />
+          ) : (
+            <LayoutGrid
+              className={`h-4 w-4 ${isPortrait ? 'rotate-90' : ''}`}
+            />
+          ),
+        }
+      })
+    : defaultAspectRatioOptions
+
+  // Determine which options to display
+  const displayOptions = isUsingAspectRatio ? aspectRatioOptions : sizeOptions
+
+  // Get the current option
+  const currentOption =
+    displayOptions.find(
+      (option) =>
+        option.value ===
+        (isUsingAspectRatio ? selectedSize.replace('x', ':') : selectedSize),
+    ) || displayOptions[0]
 
   return (
     <div className="flex-shrink-0 z-10">
@@ -267,7 +326,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
             <div className="mx-2 h-4 border-r border-accent/20" />
 
-            {/* Size selector */}
+            {/* Size/Aspect Ratio selector */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -276,16 +335,31 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                   className="h-8 gap-2 text-sm text-foreground/70 rounded-full hover:bg-accent/40"
                 >
                   <LayoutGrid className="h-3.5 w-3.5" />
-                  <span>{currentSizeOption.label}</span>
+                  <span>
+                    {currentOption?.label ||
+                      (isUsingAspectRatio ? 'Aspect Ratio' : 'Size')}
+                  </span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-48">
-                <DropdownMenuLabel>Image Size</DropdownMenuLabel>
+                <DropdownMenuLabel>
+                  {isUsingAspectRatio ? 'Aspect Ratio' : 'Image Size'}
+                </DropdownMenuLabel>
                 <DropdownMenuRadioGroup
-                  value={selectedSize}
-                  onValueChange={(value) => onSizeChange(value as ImageSize)}
+                  value={
+                    isUsingAspectRatio
+                      ? selectedSize.replace('x', ':')
+                      : selectedSize
+                  }
+                  onValueChange={(value) =>
+                    onSizeChange(
+                      isUsingAspectRatio
+                        ? (value.replace(':', 'x') as ImageSize)
+                        : (value as ImageSize),
+                    )
+                  }
                 >
-                  {sizeOptions.map((option) => (
+                  {displayOptions.map((option) => (
                     <DropdownMenuRadioItem
                       key={option.value}
                       value={option.value}

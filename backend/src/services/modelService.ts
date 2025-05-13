@@ -1,17 +1,4 @@
-export interface AIModelInfo {
-  value: string
-  label: string
-  description: string
-}
-
-// Define the structure for AI model data, ensuring it includes the provider
-// This type might also be shared or imported if used in routes/controllers directly.
-export interface AIModelData {
-  value: string // Unique identifier for the model
-  label: string // User-friendly display name
-  provider: 'google' | 'openai' // The provider of the model
-  description: string // A brief description of the model
-}
+import type { AIModelData } from '../types/models'
 
 class ModelService {
   public async getGenerationModels(): Promise<AIModelData[]> {
@@ -20,8 +7,26 @@ class ModelService {
       {
         value: 'gemini-2.0-flash-preview-image-generation',
         label: 'Gemini Flash Image Gen',
-        provider: 'google', // Explicitly add the provider
+        provider: 'google',
         description: 'Fast image generation model by Google.',
+        isMultiModalLanguageModel: true,
+        supportedAspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+      },
+      {
+        value: 'dall-e-3',
+        label: 'DALL-E 3',
+        provider: 'openai',
+        description: 'High-quality image generation model by OpenAI.',
+        isMultiModalLanguageModel: false,
+        supportedSizes: ['1024x1024', '1792x1024', '1024x1792'],
+      },
+      {
+        value: 'dall-e-2',
+        label: 'DALL-E 2',
+        provider: 'openai',
+        description: 'Smaller, faster image generation model by OpenAI.',
+        isMultiModalLanguageModel: false,
+        supportedSizes: ['256x256', '512x512', '1024x1024'],
       },
     ]
   }

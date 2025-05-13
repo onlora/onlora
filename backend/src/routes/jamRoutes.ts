@@ -14,69 +14,59 @@ import {
 } from '../middleware/auth'
 import { imageGenerationService } from '../services/imageGenerationService' // Cleaned up import
 import { deductVibeEnergy } from '../services/veService' // Import new VE service
-// Import other necessary things like pg-boss types/instance if needed for generate route later
+import type {
+  GenerateImageClientResponse,
+  SuccessfulGenerationClientResponse,
+  ValidHttpStatusCodes,
+} from '../types/api'
+import type { GenerateImageParams, MessageImageData } from '../types/images'
+import type { ModelProvider } from '../types/models'
 
 // Define AppEnv specifically for jamRoutes, extending AuthenticatedContextEnv
-const generateImageRequestBodySchema = z.object({
-  prompt: z
-    .string()
-    .min(1, { message: 'Prompt cannot be empty.' })
-    .max(4000, { message: 'Prompt too long.' }),
-  modelProvider: z.enum(['openai', 'google'], {
-    errorMap: () => ({ message: 'Invalid model provider.' }),
-  }),
-  modelId: z.string().min(1, { message: 'Model ID cannot be empty.' }),
-  size: z.string().regex(/^\d+x\d+$/, {
-    message: 'Invalid size format, expected e.g., 1024x1024.',
-  }),
-})
+const generateImageRequestBodySchema = z
+  .object({
+    prompt: z
+      .string()
+      .min(1, { message: 'Prompt cannot be empty.' })
+      .max(4000, { message: 'Prompt too long.' }),
+    modelProvider: z.enum(['openai', 'google'], {
+      errorMap: () => ({ message: 'Invalid model provider.' }),
+    }),
+    modelId: z.string().min(1, { message: 'Model ID cannot be empty.' }),
+    size: z
+      .string()
+      .regex(/^\d+x\d+$/, {
+        message: 'Invalid size format, expected e.g., 1024x1024.',
+      })
+      .optional(),
+    aspectRatio: z
+      .string()
+      .regex(/^\d+:\d+$/, {
+        message: 'Invalid aspect ratio format, expected e.g., 16:9.',
+      })
+      .optional(),
+    isMultiModalLanguageModel: z.boolean().optional(),
+    // Optional parameter to include previous messages for context
+    messages: z
+      .array(
+        z.object({
+          role: z.enum(['user', 'assistant', 'system']),
+          content: z.string(),
+          name: z.string().optional(),
+        }),
+      )
+      .optional(),
+  })
+  .refine((data) => data.size !== undefined || data.aspectRatio !== undefined, {
+    message: "Either 'size' or 'aspectRatio' must be provided",
+    path: ['dimensions'],
+  })
 
 interface JamRoutesAppEnv extends AuthenticatedContextEnv {
   ValidatedData: {
     json: z.infer<typeof generateImageRequestBodySchema>
   }
 }
-
-// Type for an image object stored in the messages.images JSONB column
-interface MessageImageData {
-  id: string // A unique ID for this image instance, e.g., timestamp or UUID
-  url: string // URL or Base64 Data URI
-  altText?: string
-  // Potentially other metadata: width, height, modelUsed etc.
-}
-
-// Updated response type for the frontend.
-interface SuccessfulGenerationClientResponse {
-  id: number // ID of the newly created assistant message
-  jamId: number
-  role: 'ai' // Consistent with schema
-  text: string | null // text can be null
-  images: MessageImageData[] | null // Array of image data objects, can be null
-  createdAt: string // ISO string
-  // For simplicity, we can also provide top-level fields for the first image if frontend expects it:
-  imageUrl?: string // primary image URL
-  altText?: string // primary image alt text
-}
-
-type GenerateImageClientResponse =
-  | SuccessfulGenerationClientResponse
-  | { code: number; message: string; currentVE?: number; requiredVE?: number }
-  | { code: number; message: string } // Generic error
-
-// Define a type for valid HTTP status codes used in this module
-// These are typically ContentfulStatusCodes in Hono context.
-type ValidHttpStatusCodes =
-  | 200
-  | 201
-  | 202
-  | 400
-  | 401
-  | 402
-  | 403
-  | 404
-  | 422
-  | 500
-  | 503
 
 const jamApp = new Hono<JamRoutesAppEnv>()
 
@@ -244,7 +234,7 @@ jamApp.post(
       // Step 2c: Store user's prompt message
       try {
         await db.insert(messagesTable).values({
-          jamId: jamId, // Use parsed jamId
+          jamId: jamId.toString(), // Convert number to string for UUID
           role: 'user',
           text: validatedBody.prompt,
         })
@@ -259,50 +249,96 @@ jamApp.post(
         )
       }
 
-      const serviceParams = {
+      const serviceParams: GenerateImageParams = {
         prompt: validatedBody.prompt,
         modelId: validatedBody.modelId,
-        modelProvider: validatedBody.modelProvider,
-        size: validatedBody.size,
+        modelProvider: validatedBody.modelProvider as ModelProvider,
         n: 1, // Generate 1 image for now
+        isMultiModalLanguageModel:
+          validatedBody.isMultiModalLanguageModel || false,
       }
+
+      // Add size or aspectRatio parameter based on what was provided
+      if (validatedBody.size) {
+        serviceParams.size = validatedBody.size
+      } else if (validatedBody.aspectRatio) {
+        serviceParams.aspectRatio = validatedBody.aspectRatio
+      }
+
+      // If there are previous messages in the jam and it's a multi-modal model, include them
+      if (validatedBody.isMultiModalLanguageModel && validatedBody.messages) {
+        serviceParams.messages = validatedBody.messages
+      } else if (validatedBody.isMultiModalLanguageModel) {
+        // Only fetch previous messages if this is a multi-modal model that can use conversation history
+        try {
+          const previousMessages = await db
+            .select()
+            .from(messagesTable)
+            .where(sql`${messagesTable.jamId} = ${jamId.toString()}`) // Convert to string for UUID
+            .orderBy(sql`${messagesTable.createdAt} ASC`)
+            .limit(10) // Limit to last 10 messages for context
+
+          if (previousMessages.length > 0) {
+            // Convert to the format expected by the image generation service
+            serviceParams.messages = previousMessages.map((msg) => ({
+              role: msg.role === 'user' ? 'user' : 'assistant', // Map 'ai' role to 'assistant'
+              content: msg.text || '', // Map database 'text' field to 'content'
+              // name is optional so we don't need to include it
+            }))
+          }
+        } catch (e) {
+          pinoLogger.warn(
+            { err: e, userId: user.id, jamId },
+            'Failed to fetch previous messages for context. Proceeding without conversation history.',
+          )
+        }
+      }
+
       const serviceResponse =
         await imageGenerationService.generateImageDirectly(serviceParams)
 
       if (
         !serviceResponse ||
-        !serviceResponse.images ||
-        serviceResponse.images.length === 0
+        ((!serviceResponse.images || serviceResponse.images.length === 0) &&
+          !serviceResponse.text)
       ) {
         pinoLogger.error(
           { userId: user.id, jamId, params: serviceParams },
-          'Service returned no images.',
+          'Service returned no images or text.',
         )
         return c.json(
-          { code: 500, message: 'Image generation failed: No image data.' },
+          { code: 500, message: 'Image generation failed: No output data.' },
           500 as ValidHttpStatusCodes,
         )
       }
 
-      const firstImage = serviceResponse.images[0]
-      const imageUrlToStore =
-        firstImage.url || `data:image/png;base64,${firstImage.base64}`
-      const imageAltText = `Generated image for: "${validatedBody.prompt.substring(0, 100)}${validatedBody.prompt.length > 100 ? '...' : ''}"`
+      // Store text and/or images depending on what we got back
+      const assistantMessageText =
+        serviceResponse.text || "Here's what I generated:"
+      let imagesToStore: MessageImageData[] = []
 
-      const newImageData: MessageImageData = {
-        id: Date.now().toString(), // Simple unique ID for the image object
-        url: imageUrlToStore,
-        altText: imageAltText,
+      // Process images if we have them
+      if (serviceResponse.images && serviceResponse.images.length > 0) {
+        imagesToStore = serviceResponse.images.map((image, index) => {
+          const imageUrlToStore =
+            image.url || `data:image/png;base64,${image.base64}`
+          const imageAltText = `Generated image ${index + 1} for: "${validatedBody.prompt.substring(0, 100)}${validatedBody.prompt.length > 100 ? '...' : ''}"`
+
+          return {
+            id: `${Date.now()}-${index}`, // Simple unique ID for the image object
+            url: imageUrlToStore,
+            altText: imageAltText,
+          }
+        })
       }
 
-      const assistantMessageText = "Here's the image you requested:"
       const insertedAssistantMessages = await db
         .insert(messagesTable)
         .values({
-          jamId: jamId,
+          jamId: jamId.toString(), // Convert number to string for UUID
           role: 'ai', // Use 'ai' as per schema
           text: assistantMessageText,
-          images: [newImageData], // Store as an array in the JSONB column
+          images: imagesToStore.length > 0 ? imagesToStore : null, // Only store images if we have them
         })
         .returning()
 
@@ -331,17 +367,21 @@ jamApp.post(
       const createdAt = newAssistantMessage.createdAt
         ? newAssistantMessage.createdAt.toISOString()
         : new Date().toISOString()
-      const responseJamId =
-        newAssistantMessage.jamId !== null ? newAssistantMessage.jamId : jamId // Fallback, though jamId on message should be set
+      let responseJamId: string
+      if (newAssistantMessage.jamId !== null) {
+        responseJamId = newAssistantMessage.jamId.toString()
+      } else {
+        responseJamId = jamId.toString() // Fallback to parsed jamId from URL parameter
+      }
 
       const clientResponse: SuccessfulGenerationClientResponse = {
-        id: newAssistantMessage.id,
-        jamId: responseJamId,
+        id: newAssistantMessage.id, // Already UUID string from database
+        jamId: responseJamId, // Now guaranteed to be string
         role: newAssistantMessage.role as 'ai', // Role will be 'ai'
         text: newAssistantMessage.text,
-        images: newAssistantMessage.images as MessageImageData[] | null, // Cast if necessary, or parse
+        images: newAssistantMessage.images as MessageImageData[] | null,
         createdAt: createdAt,
-        // Provide top-level fields for the first image for easier frontend consumption initially
+        // Provide top-level fields for the first image for easier frontend consumption
         imageUrl:
           newAssistantMessage.images &&
           Array.isArray(newAssistantMessage.images) &&
@@ -433,7 +473,7 @@ jamApp.get(
       const messages = await db
         .select()
         .from(messagesTable)
-        .where(sql`${messagesTable.jamId} = ${jamId}`)
+        .where(sql`${messagesTable.jamId} = ${jamId.toString()}`)
         .orderBy(sql`${messagesTable.createdAt} ASC`)
 
       pinoLogger.info(

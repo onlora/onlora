@@ -6,8 +6,8 @@ export interface CreatePostPayload {
   description?: string
   tags?: string[]
   visibility: PostVisibility
-  imageIds: number[]
-  jamId?: number // Optional: to link posts to the jam session they originated from
+  imageIds: string[] // Changed from number[] to string[] to match UUID format
+  jamId?: string // Changed from number to string to match UUID format
   // Remix fields
   parentPostId?: number
   rootPostId?: number
@@ -39,7 +39,7 @@ export interface PostAuthor {
 }
 
 export interface PostImage {
-  id: number
+  id: string // Changed from number to string to match UUID format
   url: string
 }
 
