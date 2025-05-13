@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto' // Updated to use node: protocol
 import { zValidator } from '@hono/zod-validator'
 import { type Context, Hono, type TypedResponse } from 'hono'
 import { pino } from 'pino' // Assuming pino is used for logging, adjust if global logger is preferred
@@ -80,7 +81,7 @@ const pinoLogger = pino({
       : undefined,
 })
 
-// Create a new Jam session (maps to POST / if registered under /api/jams)
+// Create a new Jam (maps to POST / if registered under /api/jams)
 jamApp.post(
   '/',
   requireAuthMiddleware,
@@ -114,7 +115,7 @@ jamApp.post(
         return c.json(
           {
             code: 500,
-            message: 'Failed to create jam session',
+            message: 'Failed to create jam',
           } as GenerateImageClientResponse,
           500 as ValidHttpStatusCodes,
         )
@@ -127,7 +128,7 @@ jamApp.post(
     } catch (error) {
       pinoLogger.error(
         { err: error, userId: user.id },
-        'Error creating new jam session',
+        'Error creating new jam',
       )
       return c.json(
         {
@@ -164,14 +165,18 @@ jamApp.post(
     }
 
     const jamIdString = c.req.param('jamId')
-    const jamId = Number.parseInt(jamIdString, 10)
 
-    if (Number.isNaN(jamId)) {
+    // UUID validation pattern
+    const uuidPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidPattern.test(jamIdString)) {
       return c.json(
         { code: 400, message: 'Invalid Jam ID format.' },
         400 as ValidHttpStatusCodes,
       )
     }
+
+    const jamId = jamIdString // Use the string directly
 
     const validatedBody = c.req.valid('json' as never) as z.infer<
       typeof generateImageRequestBodySchema
@@ -183,7 +188,7 @@ jamApp.post(
       // If strict ownership is needed:
       const ownership = await verifyUserJamOwnership(user.id, jamId)
       if (!ownership.jamExists) {
-        return c.json({ code: 404, message: 'Jam session not found.' }, 404)
+        return c.json({ code: 404, message: 'Jam not found.' }, 404)
       }
       if (!ownership.isOwner) {
         pinoLogger.warn(
@@ -231,24 +236,6 @@ jamApp.post(
         'Vibe Energy processed successfully for image generation.',
       )
 
-      // Step 2c: Store user's prompt message
-      try {
-        await db.insert(messagesTable).values({
-          jamId: jamId.toString(), // Convert number to string for UUID
-          role: 'user',
-          text: validatedBody.prompt,
-        })
-        pinoLogger.info(
-          { userId: user.id, jamId, prompt: validatedBody.prompt },
-          'User prompt message stored',
-        )
-      } catch (msgError) {
-        pinoLogger.error(
-          { err: msgError, userId: user.id, jamId },
-          'Failed to store user prompt message. Proceeding with generation.',
-        )
-      }
-
       const serviceParams: GenerateImageParams = {
         prompt: validatedBody.prompt,
         modelId: validatedBody.modelId,
@@ -265,33 +252,19 @@ jamApp.post(
         serviceParams.aspectRatio = validatedBody.aspectRatio
       }
 
-      // If there are previous messages in the jam and it's a multi-modal model, include them
+      // For multi-modal models, use the messages provided by the frontend
       if (validatedBody.isMultiModalLanguageModel && validatedBody.messages) {
         serviceParams.messages = validatedBody.messages
-      } else if (validatedBody.isMultiModalLanguageModel) {
-        // Only fetch previous messages if this is a multi-modal model that can use conversation history
-        try {
-          const previousMessages = await db
-            .select()
-            .from(messagesTable)
-            .where(sql`${messagesTable.jamId} = ${jamId.toString()}`) // Convert to string for UUID
-            .orderBy(sql`${messagesTable.createdAt} ASC`)
-            .limit(10) // Limit to last 10 messages for context
-
-          if (previousMessages.length > 0) {
-            // Convert to the format expected by the image generation service
-            serviceParams.messages = previousMessages.map((msg) => ({
-              role: msg.role === 'user' ? 'user' : 'assistant', // Map 'ai' role to 'assistant'
-              content: msg.text || '', // Map database 'text' field to 'content'
-              // name is optional so we don't need to include it
-            }))
-          }
-        } catch (e) {
-          pinoLogger.warn(
-            { err: e, userId: user.id, jamId },
-            'Failed to fetch previous messages for context. Proceeding without conversation history.',
-          )
-        }
+        pinoLogger.info(
+          {
+            userId: user.id,
+            jamId,
+            messageCount: validatedBody.messages.length,
+            modelProvider: validatedBody.modelProvider,
+            modelId: validatedBody.modelId,
+          },
+          'Using messages provided by the frontend for multi-modal model',
+        )
       }
 
       const serviceResponse =
@@ -325,7 +298,7 @@ jamApp.post(
           const imageAltText = `Generated image ${index + 1} for: "${validatedBody.prompt.substring(0, 100)}${validatedBody.prompt.length > 100 ? '...' : ''}"`
 
           return {
-            id: `${Date.now()}-${index}`, // Simple unique ID for the image object
+            id: randomUUID(), // Generate a proper UUID for each image
             url: imageUrlToStore,
             altText: imageAltText,
           }
@@ -335,7 +308,7 @@ jamApp.post(
       const insertedAssistantMessages = await db
         .insert(messagesTable)
         .values({
-          jamId: jamId.toString(), // Convert number to string for UUID
+          jamId: jamId,
           role: 'ai', // Use 'ai' as per schema
           text: assistantMessageText,
           images: imagesToStore.length > 0 ? imagesToStore : null, // Only store images if we have them
@@ -371,7 +344,7 @@ jamApp.post(
       if (newAssistantMessage.jamId !== null) {
         responseJamId = newAssistantMessage.jamId.toString()
       } else {
-        responseJamId = jamId.toString() // Fallback to parsed jamId from URL parameter
+        responseJamId = jamId // Fallback to parsed jamId from URL parameter
       }
 
       const clientResponse: SuccessfulGenerationClientResponse = {
@@ -432,11 +405,12 @@ jamApp.get(
       )
     }
 
-    const jamId = Number.parseInt(c.req.param('jamId'), 10)
+    const jamId = c.req.param('jamId')
 
-    if (Number.isNaN(jamId)) {
+    // Validate UUID format if needed
+    if (!jamId) {
       return c.json(
-        { code: 400, message: 'Invalid Jam ID format' },
+        { code: 400, message: 'Jam ID is required' },
         400 as ValidHttpStatusCodes,
       )
     }
@@ -449,7 +423,7 @@ jamApp.get(
 
       if (!jamExists) {
         return c.json(
-          { code: 404, message: 'Jam session not found' },
+          { code: 404, message: 'Jam not found' },
           404 as ValidHttpStatusCodes,
         )
       }
@@ -464,7 +438,7 @@ jamApp.get(
           'User attempted to access messages for a jam they do not own.',
         )
         return c.json(
-          { code: 404, message: 'Jam session not found' },
+          { code: 404, message: 'Jam not found' },
           404 as ValidHttpStatusCodes,
         ) // Keep 404 for privacy
       }
@@ -473,7 +447,7 @@ jamApp.get(
       const messages = await db
         .select()
         .from(messagesTable)
-        .where(sql`${messagesTable.jamId} = ${jamId.toString()}`)
+        .where(sql`${messagesTable.jamId} = ${jamId}`)
         .orderBy(sql`${messagesTable.createdAt} ASC`)
 
       pinoLogger.info(

@@ -1,8 +1,8 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
-import type { MessageImage } from '@/lib/api/jamApi'
 import { cn } from '@/lib/utils'
+import type { MessageImage } from '@/types/images'
 import {
   ArrowLeft,
   Check,
@@ -10,6 +10,7 @@ import {
   Download,
   Grid,
   LayoutGrid,
+  Loader2,
   Maximize,
   Pocket,
   X,
@@ -24,6 +25,7 @@ interface ImagePanelProps {
   onSave: () => void
   onPublish: () => void
   onClose?: () => void
+  isSaving?: boolean
 }
 
 export const ImagePanel = ({
@@ -34,6 +36,7 @@ export const ImagePanel = ({
   onSave,
   onPublish,
   onClose,
+  isSaving = false,
 }: ImagePanelProps) => {
   // Toggle between grid and single image view
   const [viewMode, setViewMode] = useState<'grid' | 'single'>('grid')
@@ -246,11 +249,15 @@ export const ImagePanel = ({
                 variant="outline"
                 size="icon"
                 className="h-8 w-8 rounded-full"
-                disabled={selectedImageIds.size === 0}
+                disabled={selectedImageIds.size === 0 || isSaving}
                 onClick={onSave}
                 title="Save to your private gallery"
               >
-                <Pocket className="h-4 w-4" />
+                {isSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Pocket className="h-4 w-4" />
+                )}
               </Button>
 
               <Button

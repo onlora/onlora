@@ -16,9 +16,9 @@ export interface GenerationError {
 }
 
 /**
- * Create a new jam session
+ * Create a new jam
  */
-export async function createJamSession(): Promise<{ jamId: string }> {
+export async function createJam(): Promise<{ jamId: string }> {
   return apiClient<{ jamId: string }>('/jams', {
     method: 'POST',
     credentials: 'include',
@@ -26,7 +26,7 @@ export async function createJamSession(): Promise<{ jamId: string }> {
 }
 
 /**
- * Get all messages for a jam session
+ * Get all messages for a jam
  */
 export async function getJamMessages(jamId: string): Promise<Message[]> {
   return apiClient<Message[]>(`/jams/${jamId}/messages`, {
@@ -35,7 +35,7 @@ export async function getJamMessages(jamId: string): Promise<Message[]> {
 }
 
 /**
- * Generate an image in a jam session
+ * Generate an image in a jam
  */
 export async function generateImage(
   jamId: string,

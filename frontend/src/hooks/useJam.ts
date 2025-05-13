@@ -1,12 +1,9 @@
 'use client'
 
 import type { ApiError } from '@/lib/api/apiClient'
-import {
-  createJamSession,
-  generateImage,
-  getJamMessages,
-} from '@/lib/api/jamApi'
+import { createJam, generateImage, getJamMessages } from '@/lib/api/jamApi'
 import type {
+  ApiMessage,
   GenerateImageParams,
   GenerationResponse,
   Message,
@@ -21,6 +18,7 @@ import { toast } from 'sonner'
 // Extend Message type for optimistic loading state
 interface OptimisticMessage extends Message {
   isLoading?: boolean
+  isError?: boolean
 }
 
 export interface SubmitPromptParams {
@@ -32,7 +30,7 @@ export interface SubmitPromptParams {
   isMultiModalLanguageModel?: boolean
 }
 
-export interface UseJamSessionReturn {
+export interface UseJamReturn {
   messages: Message[]
   isGenerating: boolean
   generatedImages: MessageImage[]
@@ -43,9 +41,7 @@ export interface UseJamSessionReturn {
   isInitializing: boolean
 }
 
-export function useJamSession(
-  initialJamId?: string | null,
-): UseJamSessionReturn {
+export function useJam(initialJamId?: string | null): UseJamReturn {
   const queryClient = useQueryClient()
   const router = useRouter()
   const [resolvedJamId, setResolvedJamId] = useState<string | null>(
@@ -62,15 +58,15 @@ export function useJamSession(
   const lastTempIdRef = useRef<string | null>(null)
   const hasOptimisticUpdatesRef = useRef<boolean>(false)
 
-  // Create new jam session
+  // Create new jam
   const { mutate: createJamMutation, isPending: isCreatingJam } = useMutation<
     { jamId: string },
     ApiError
   >({
-    mutationFn: createJamSession,
+    mutationFn: createJam,
     onSuccess: (data) => {
       setResolvedJamId(data.jamId)
-      toast.success('New Jam session started!')
+      toast.success('New Jam started!')
 
       // Update URL
       const currentPath = window.location.pathname.substring(
@@ -82,7 +78,7 @@ export function useJamSession(
       setIsInitializing(false)
     },
     onError: (error) => {
-      toast.error(`Failed to create Jam session: ${error.message}`)
+      toast.error(`Failed to create Jam: ${error.message}`)
       router.push('/')
       setIsInitializing(false)
     },
@@ -154,9 +150,9 @@ export function useJamSession(
       }
     }
 
-    // Filter out loading messages when we have server data
+    // Filter out loading messages and error messages when we have server data
     const finalOptimistic = fetchedMessages
-      ? optimisticMessages.filter((msg) => !msg.isLoading)
+      ? optimisticMessages.filter((msg) => !msg.isLoading && !msg.isError)
       : optimisticMessages
 
     return [...(fetchedMessages || []), ...finalOptimistic] as Message[]
@@ -167,8 +163,8 @@ export function useJamSession(
     useMutation<GenerationResponse, ApiError, GenerateImageParams>({
       mutationFn: (params) => {
         if (!resolvedJamId) {
-          toast.error('Jam session is not active.')
-          throw new Error('Jam session not resolved for image generation.')
+          toast.error('Jam is not active.')
+          throw new Error('Jam not resolved for image generation.')
         }
         return generateImage(resolvedJamId, params)
       },
@@ -217,13 +213,61 @@ export function useJamSession(
         }
       },
       onError: (error) => {
-        toast.error(`Image generation failed: ${error.message}`)
+        // Clean up loading message
         setOptimisticMessages((prev) =>
-          prev.filter(
-            (msg) =>
-              msg.id !== lastTempIdRef.current &&
-              msg.id !== `temp-ai-${lastTempIdRef.current}`,
-          ),
+          prev.filter((msg) => msg.id !== `temp-ai-${lastTempIdRef.current}`),
+        )
+
+        // Create an error message based on the error type
+        let errorMessage = 'Image generation failed. Please try again.'
+        let errorDetails = ''
+
+        // Check for Vibe Energy insufficient error (code 402)
+        if (error.status === 402 && error.responseBody) {
+          const { currentVE, requiredVE } = error.responseBody
+
+          if (currentVE !== undefined && requiredVE !== undefined) {
+            errorMessage = 'Insufficient Vibe Energy'
+            errorDetails = `You currently have ${currentVE} VE, but need ${requiredVE} VE to generate an image. Check in daily to earn more Vibe Energy!`
+
+            // Show toast with more details
+            toast.error(
+              `Insufficient Vibe Energy: You have ${currentVE} VE but need ${requiredVE} VE to generate an image.`,
+              {
+                duration: 6000,
+                description: 'Check in daily to earn more Vibe Energy!',
+                action: {
+                  label: 'Learn More',
+                  onClick: () => window.open('/profile/ve-history', '_blank'),
+                },
+              },
+            )
+          } else {
+            // Generic error for other 402 cases
+            toast.error(`Image generation failed: ${error.message}`)
+          }
+        } else {
+          // Handle other errors
+          toast.error(`Image generation failed: ${error.message}`)
+        }
+
+        // Create a temporary AI error message that will be displayed in the chat
+        // Add a unique identifier with timestamp to make it easy to remove later
+        const errorId = `error-${Date.now()}`
+        const errorAiMessage: OptimisticMessage = {
+          id: errorId,
+          role: 'ai',
+          text: `${errorMessage}${errorDetails ? `\n\n${errorDetails}` : ''}`,
+          createdAt: new Date().toISOString(),
+          isError: true, // Mark this as an error message for easier identification
+        }
+
+        // Add the error message to our optimistic messages
+        setOptimisticMessages((prev) => [...prev, errorAiMessage])
+
+        // Remove the original user message to allow retry
+        setOptimisticMessages((prev) =>
+          prev.filter((msg) => msg.id !== lastTempIdRef.current),
         )
       },
     })
@@ -232,7 +276,7 @@ export function useJamSession(
   const submitPrompt = useCallback(
     (params: SubmitPromptParams) => {
       if (!resolvedJamId) {
-        toast.error('Jam session is not active.')
+        toast.error('Jam is not active.')
         return
       }
       if (isGeneratingImage) {
@@ -295,19 +339,24 @@ export function useJamSession(
         imageParams.aspectRatio = params.aspectRatio
       }
 
-      // Add conversation context for multi-modal models
+      // For multi-modal models, send the conversation history
       if (params.isMultiModalLanguageModel && fetchedMessages) {
-        // Convert recent messages to the format expected by the API
-        const recentMessages = fetchedMessages
-          .slice(-5) // Get last 5 messages for context
-          .map((msg) => ({
-            role: msg.role === 'user' ? 'user' : 'assistant',
-            content: msg.text || '',
-          }))
+        // Use all available messages instead of limiting to the last 5
+        const allMessages = [...fetchedMessages, userMessage]
 
-        if (recentMessages.length > 0) {
-          imageParams.messages = recentMessages
-        }
+        // Create a new array with the correct format for the API
+        const apiMessages: ApiMessage[] = allMessages.map((msg) => ({
+          role:
+            msg.role === 'user'
+              ? 'user'
+              : msg.role === 'ai'
+                ? 'assistant'
+                : 'system',
+          content: msg.text || '',
+        }))
+
+        // Now we can assign directly since we're using the proper type
+        imageParams.messages = apiMessages
       }
 
       // Trigger generation

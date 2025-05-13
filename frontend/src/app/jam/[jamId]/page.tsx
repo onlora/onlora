@@ -6,17 +6,18 @@ import { ImagePanel } from '@/components/jam/ImagePanel'
 import { MessageList } from '@/components/jam/MessageList'
 import { type PublishData, PublishSheet } from '@/components/jam/PublishSheet'
 import { Button } from '@/components/ui/button'
-import { useJamSession } from '@/hooks/useJamSession'
+import { useJam } from '@/hooks/useJam'
 import type { ApiError } from '@/lib/api/apiClient'
-import type { MessageImage } from '@/lib/api/jamApi'
-import type { AIModelData as ApiAIModelDataFromApi } from '@/lib/api/modelApi'
 import {
   type CreatePostPayload,
   type PostCloneInfo,
+  type PostImageData,
   createPost,
   getPostCloneInfo,
 } from '@/lib/api/postApi'
 import { cn } from '@/lib/utils'
+import type { MessageImage } from '@/types/images'
+import type { AIModelData } from '@/types/models'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -53,8 +54,7 @@ export default function JamPage() {
   const [activatedImage, setActivatedImage] = useState<MessageImage | null>(
     null,
   )
-  const [selectedModel, setSelectedModel] =
-    useState<ApiAIModelDataFromApi | null>(null)
+  const [selectedModel, setSelectedModel] = useState<AIModelData | null>(null)
   const [showImagePanel, setShowImagePanel] = useState(false)
 
   // Add a local copy of all images from all messages
@@ -62,7 +62,7 @@ export default function JamPage() {
     [],
   )
 
-  // Jam session hook for messaging and image generation
+  // Jam hook for messaging and image generation
   const {
     messages: allMessages,
     isGenerating,
@@ -72,7 +72,7 @@ export default function JamPage() {
     messagesError,
     resolvedJamId,
     isInitializing,
-  } = useJamSession(jamIdFromParams)
+  } = useJam(jamIdFromParams)
 
   // Extract all images from messages when they load or change
   useEffect(() => {
@@ -167,7 +167,7 @@ export default function JamPage() {
 
     // First check in jamGeneratedImages
     if (jamGeneratedImages.length > 0) {
-      const fromGenerated = jamGeneratedImages.filter((img) =>
+      const fromGenerated = jamGeneratedImages.filter((img: MessageImage) =>
         selectedImageIds.has(img.id),
       )
       selectedImages.push(...fromGenerated)
@@ -179,7 +179,7 @@ export default function JamPage() {
       allAvailableImages.length > 0
     ) {
       const fromAvailable = allAvailableImages.filter(
-        (img) =>
+        (img: MessageImage) =>
           selectedImageIds.has(img.id) &&
           !selectedImages.some((selected) => selected.id === img.id),
       )
@@ -195,7 +195,7 @@ export default function JamPage() {
           message.images.length > 0
         ) {
           const fromMessage = message.images.filter(
-            (img) =>
+            (img: MessageImage) =>
               selectedImageIds.has(img.id) &&
               !selectedImages.some((selected) => selected.id === img.id),
           )
@@ -209,7 +209,7 @@ export default function JamPage() {
 
   // Use all available images as the source for the image panel, not just recent ones
   const imagesForPanel = useMemo(() => {
-    // First try to use jamGeneratedImages if available (useJamSession's internal collection)
+    // First try to use jamGeneratedImages if available (useJam's internal collection)
     if (jamGeneratedImages.length > 0) {
       return [...jamGeneratedImages].reverse()
     }
@@ -234,9 +234,9 @@ export default function JamPage() {
     if (directFromMessages.length > 0) {
       // Also add these to our allAvailableImages collection for future use
       setAllAvailableImages((prev) => {
-        const existingIds = new Set(prev.map((img) => img.id))
+        const existingIds = new Set(prev.map((img: MessageImage) => img.id))
         const newImages = directFromMessages.filter(
-          (img) => !existingIds.has(img.id),
+          (img: MessageImage) => !existingIds.has(img.id),
         )
         return newImages.length > 0 ? [...prev, ...newImages] : prev
       })
@@ -284,7 +284,7 @@ export default function JamPage() {
     // Store all available images if not already stored
     setAllAvailableImages((prev) => {
       // Check if this image is already in our collection
-      if (prev.some((img) => img.id === image.id)) {
+      if (prev.some((img: MessageImage) => img.id === image.id)) {
         return prev
       }
       // Add it if it's not already there
@@ -317,14 +317,83 @@ export default function JamPage() {
     }
   }
 
-  const handleSaveToGallery = () => {
-    // TODO: Implement save to gallery functionality
-    console.log('Save to gallery:', Array.from(selectedImageIds))
+  // Save to gallery mutation
+  const { mutate: saveToGallery, isPending: isSavingToGallery } = useMutation<
+    { postId: number },
+    ApiError,
+    void
+  >({
+    mutationFn: async () => {
+      if (!resolvedJamId) throw new Error('Jam ID not resolved for saving')
 
-    // Show toast notification
-    toast.success(
-      `${selectedImageIds.size} image${selectedImageIds.size !== 1 ? 's' : ''} saved to gallery`,
-    )
+      // Get the selected images
+      const selectedImagesArray: MessageImage[] = []
+
+      // First check if we have any selected images through the selectedImageIds
+      if (selectedImageIds.size > 0) {
+        // Use the imagesToPublish which already contains the filtered selected images
+        selectedImagesArray.push(...imagesToPublish)
+      }
+      // If no selection, fall back to activated image
+      else if (activatedImage) {
+        selectedImagesArray.push(activatedImage)
+      }
+
+      // Final check - we need at least one image
+      if (selectedImagesArray.length === 0) {
+        throw new Error('No images selected for saving to gallery')
+      }
+
+      // Convert MessageImage objects to the PostImageData format needed by the API
+      const imageDataArray: PostImageData[] = selectedImagesArray.map(
+        (img) => ({
+          id: img.id,
+          data: img.url,
+          altText: img.altText,
+        }),
+      )
+
+      const payload: CreatePostPayload = {
+        title: `Jam ${new Date().toLocaleDateString()}`,
+        description: '',
+        tags: [],
+        images: imageDataArray,
+        jamId: resolvedJamId,
+        visibility: 'private', // Save to gallery = private post
+      }
+
+      return createPost(payload)
+    },
+    onSuccess: (data) => {
+      setSelectedImageIds(new Set()) // Clear selection after saving
+      toast.success(
+        `${selectedImageIds.size} image${selectedImageIds.size !== 1 ? 's' : ''} saved to gallery`,
+        {
+          action: {
+            label: 'View',
+            onClick: () => router.push('/profile'),
+          },
+        },
+      )
+    },
+    onError: (error) => {
+      console.error('Error saving to gallery:', error)
+      toast.error(`Failed to save images: ${error.message || 'Unknown error'}`)
+    },
+  })
+
+  const handleSaveToGallery = () => {
+    // If no images are selected but there's an activated image, use that
+    if (selectedImageIds.size === 0 && activatedImage) {
+      setSelectedImageIds(new Set([activatedImage.id]))
+    }
+
+    // Check if we have images to save
+    if (selectedImageIds.size > 0) {
+      saveToGallery()
+    } else {
+      toast.error('Please select at least one image to save')
+    }
   }
 
   // Publish post mutation
@@ -336,30 +405,45 @@ export default function JamPage() {
     mutationFn: async (formData) => {
       if (!resolvedJamId) throw new Error('Jam ID not resolved for publishing')
 
-      // Get the image IDs for publishing
-      const imageIds = Array.from(selectedImageIds)
+      // Get the selected images
+      const selectedImagesArray: MessageImage[] = []
 
-      // Fall back to activated image if needed
-      if (imageIds.length === 0 && activatedImage) {
-        imageIds.push(activatedImage.id)
+      // First check if we have any selected images through the selectedImageIds
+      if (selectedImageIds.size > 0) {
+        // Use the imagesToPublish which already contains the filtered selected images
+        selectedImagesArray.push(...imagesToPublish)
+      }
+      // If no selection, fall back to activated image
+      else if (activatedImage) {
+        selectedImagesArray.push(activatedImage)
       }
 
       // Final check - we need at least one image
-      if (imageIds.length === 0) {
+      if (selectedImagesArray.length === 0) {
         throw new Error('No images selected for publishing')
       }
 
+      // Convert MessageImage objects to the PostImageData format needed by the API
+      const imageDataArray: PostImageData[] = selectedImagesArray.map(
+        (img) => ({
+          id: img.id,
+          data: img.url,
+          altText: img.altText,
+        }),
+      )
+
+      // Create the payload
       const payload: CreatePostPayload = {
         ...formData,
-        imageIds: imageIds,
+        images: imageDataArray,
         jamId: resolvedJamId,
         visibility: 'public', // Always public when publishing
       }
 
       // Add remix metadata if available
       if (initialPublishData) {
-        payload.parentPostId = initialPublishData.parentPostId
-        payload.rootPostId = initialPublishData.rootPostId
+        payload.parentPostId = initialPublishData.parentPostId?.toString()
+        payload.rootPostId = initialPublishData.rootPostId?.toString()
         payload.generation = initialPublishData.generation
       }
 
@@ -373,6 +457,7 @@ export default function JamPage() {
     },
     onError: (error) => {
       console.error('Error publishing post:', error)
+      toast.error(`Publishing failed: ${error.message || 'Unknown error'}`)
     },
   })
 
@@ -383,7 +468,7 @@ export default function JamPage() {
         <div className="flex items-center justify-center h-screen">
           <Loader2 className="h-10 w-10 animate-spin text-primary" />
           <p className="ml-3 text-xl text-muted-foreground">
-            Starting your Jam session...
+            Starting your Jam...
           </p>
         </div>
       </ProtectedPage>
@@ -396,10 +481,10 @@ export default function JamPage() {
       <ProtectedPage>
         <div className="flex flex-col items-center justify-center h-screen">
           <AlertTriangle className="h-16 w-16 text-destructive mb-6" />
-          <h2 className="text-2xl font-semibold mb-3">Jam Session Error</h2>
+          <h2 className="text-2xl font-semibold mb-3">Jam Error</h2>
           <p className="text-lg text-muted-foreground mb-6 text-center max-w-md">
-            We couldn't start or load your Jam session. Please try returning to
-            the homepage and starting a new Jam.
+            We couldn't start or load your Jam. Please try returning to the
+            homepage and starting a new Jam.
           </p>
           <Button
             onClick={() => router.push('/')}
@@ -498,7 +583,9 @@ export default function JamPage() {
                 currentModelId={selectedModel?.value ?? null}
                 isLoading={isGenerating}
                 selectedSize={selectedSize}
-                onSizeChange={setSelectedSize}
+                onSizeChange={(newSize: string) =>
+                  setSelectedSize(newSize as ImageSize)
+                }
                 jamId={resolvedJamId}
               />
             </div>
@@ -525,6 +612,7 @@ export default function JamPage() {
                   onSave={handleSaveToGallery}
                   onPublish={handlePublish}
                   onClose={handleClosePanel}
+                  isSaving={isSavingToGallery}
                 />
               )}
             </div>

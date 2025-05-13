@@ -5,7 +5,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || 'development',
   databaseUrl: process.env.DATABASE_URL,
   openaiApiKey: process.env.OPENAI_API_KEY,
-  googleApiKey: process.env.GOOGLE_API_KEY,
+  googleGenerativeAiApiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   r2BucketName: process.env.R2_BUCKET_NAME,
   r2AccountId: process.env.R2_ACCOUNT_ID,
   r2AccessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -28,9 +28,9 @@ if (!config.openaiApiKey) {
     'Warning: OPENAI_API_KEY is not defined. OpenAI features may not work.',
   )
 }
-if (!config.googleApiKey) {
+if (!config.googleGenerativeAiApiKey) {
   console.warn(
-    'Warning: GOOGLE_API_KEY is not defined. Google AI features may not work.',
+    'Warning: GOOGLE_GENERATIVE_AI_API_KEY is not defined. Google AI features may not work.',
   )
 }
 if (

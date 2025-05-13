@@ -13,20 +13,12 @@ class ModelService {
         supportedAspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4'],
       },
       {
-        value: 'dall-e-3',
-        label: 'DALL-E 3',
+        value: 'gpt-image-1',
+        label: 'GPT Image 1',
         provider: 'openai',
         description: 'High-quality image generation model by OpenAI.',
         isMultiModalLanguageModel: false,
-        supportedSizes: ['1024x1024', '1792x1024', '1024x1792'],
-      },
-      {
-        value: 'dall-e-2',
-        label: 'DALL-E 2',
-        provider: 'openai',
-        description: 'Smaller, faster image generation model by OpenAI.',
-        isMultiModalLanguageModel: false,
-        supportedSizes: ['256x256', '512x512', '1024x1024'],
+        supportedSizes: ['1024x1024', '1536x1024', '1024x1536'],
       },
     ]
   }

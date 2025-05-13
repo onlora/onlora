@@ -62,17 +62,6 @@ export const images = pgTable('images', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
-export const jamSessions = pgTable('jam_sessions', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  userId: text('user_id')
-    .references(() => users.id, { onDelete: 'cascade' })
-    .notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
-  // title: text('title'), // Optional title for a jam session
-  // settings: jsonb('settings'), // Could store things like model, aspect ratio etc.
-})
-
 export const posts = pgTable('posts', {
   id: uuid('id').defaultRandom().primaryKey(),
   authorId: text('author_id').references(() => users.id, {
@@ -83,7 +72,7 @@ export const posts = pgTable('posts', {
   tags: text('tags').array(), // Array of strings for tags
   visibility: visibilityEnum('visibility').default('public'),
   coverImg: text('cover_img'),
-  jamSessionId: uuid('jam_session_id').references(() => jamSessions.id, {
+  jamId: uuid('jam_id').references(() => jams.id, {
     onDelete: 'set null',
   }), // Optional link to original jam session
   likeCount: integer('like_count').default(0).notNull(),
@@ -106,6 +95,10 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
   author: one(users, {
     fields: [posts.authorId],
     references: [users.id],
+  }),
+  jam: one(jams, {
+    fields: [posts.jamId],
+    references: [jams.id],
   }),
   parentPost: one(posts, {
     fields: [posts.parentPostId],
@@ -338,14 +331,6 @@ export const postImagesRelations = relations(postImages, ({ one }) => ({
     fields: [postImages.imageId],
     references: [images.id],
   }),
-}))
-
-export const jamSessionsRelations = relations(jamSessions, ({ one, many }) => ({
-  user: one(users, {
-    fields: [jamSessions.userId],
-    references: [users.id],
-  }),
-  messages: many(messages),
 }))
 
 // --- Bookmarks Table ---

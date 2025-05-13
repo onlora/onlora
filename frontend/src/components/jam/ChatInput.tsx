@@ -9,6 +9,12 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { ApiError } from '@/lib/api/apiClient'
 import { getGenerationModels } from '@/lib/api/modelApi'
 import { cn } from '@/lib/utils'
@@ -17,9 +23,9 @@ import { useQuery } from '@tanstack/react-query'
 import {
   BrainCircuit,
   LayoutGrid,
+  Loader2,
   SendHorizontal,
-  Settings,
-  SquareIcon,
+  Zap,
 } from 'lucide-react'
 import type React from 'react'
 import { useEffect, useRef, useState } from 'react'
@@ -102,10 +108,38 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       modelSource = 'no_models_from_api'
     }
 
-    if (modelToSet?.value !== currentModel?.value) {
+    // Check if model is actually changing
+    const isModelChanging = modelToSet?.value !== currentModel?.value
+
+    if (isModelChanging) {
+      // First set the model
       setCurrentModel(modelToSet)
       if (onModelChange) {
         onModelChange(modelToSet)
+      }
+
+      // When model changes, set default size
+      if (modelToSet) {
+        // Determine whether to use aspect ratio or size
+        const usesAspectRatio =
+          modelToSet.supportedAspectRatios &&
+          modelToSet.supportedAspectRatios.length > 0
+
+        if (
+          usesAspectRatio &&
+          modelToSet.supportedAspectRatios &&
+          modelToSet.supportedAspectRatios.length > 0
+        ) {
+          // Use the first supported aspect ratio, converted to API format
+          const defaultRatio = modelToSet.supportedAspectRatios[0]
+          onSizeChange(defaultRatio.replace(':', 'x') as ImageSize)
+        } else if (
+          modelToSet.supportedSizes &&
+          modelToSet.supportedSizes.length > 0
+        ) {
+          // Use the first supported size
+          onSizeChange(modelToSet.supportedSizes[0] as ImageSize)
+        }
       }
     } else if (
       onModelChange &&
@@ -120,6 +154,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     modelsLoading,
     onModelChange,
     currentModel,
+    onSizeChange,
   ])
 
   useEffect(() => {
@@ -197,63 +232,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
   }
 
-  // Default size options if model doesn't specify any
-  const defaultSizeOptions = [
-    {
-      value: '512x512',
-      label: '512×512',
-      icon: <SquareIcon className="h-3.5 w-3.5" />,
-    },
-    {
-      value: '768x768',
-      label: '768×768',
-      icon: <SquareIcon className="h-4 w-4" />,
-    },
-    {
-      value: '1024x1024',
-      label: '1024×1024',
-      icon: <SquareIcon className="h-4.5 w-4.5" />,
-    },
-  ]
-
-  // Default aspect ratio options if model uses aspect ratios
-  const defaultAspectRatioOptions = [
-    {
-      value: '1:1',
-      label: '1:1 (Square)',
-      icon: <SquareIcon className="h-4 w-4" />,
-    },
-    {
-      value: '16:9',
-      label: '16:9 (Landscape)',
-      icon: <LayoutGrid className="h-4 w-4" />,
-    },
-    {
-      value: '9:16',
-      label: '9:16 (Portrait)',
-      icon: <LayoutGrid className="h-4 w-4 rotate-90" />,
-    },
-  ]
-
   // Determine what options to show based on the selected model
   const isUsingAspectRatio =
     currentModel?.supportedAspectRatios &&
     currentModel.supportedAspectRatios.length > 0
 
-  // Generate size options based on model's supported sizes if available
+  // Generate size options based on model's supported sizes
   const sizeOptions = currentModel?.supportedSizes
     ? currentModel.supportedSizes.map((size) => {
-        const [width, height] = size.split('x').map(Number)
-        const iconSize = Math.min(4.5, 3.5 + width / 1024)
         return {
           value: size,
           label: size.replace('x', '×'),
-          icon: <SquareIcon className={`h-${iconSize} w-${iconSize}`} />,
         }
       })
-    : defaultSizeOptions
+    : []
 
-  // Generate aspect ratio options based on model's supported aspect ratios if available
+  // Generate aspect ratio options based on model's supported aspect ratios
   const aspectRatioOptions = currentModel?.supportedAspectRatios
     ? currentModel.supportedAspectRatios.map((ratio) => {
         const [width, height] = ratio.split(':').map(Number)
@@ -264,16 +258,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         return {
           value: ratio,
           label: `${ratio} ${isSquare ? '(Square)' : isLandscape ? '(Landscape)' : '(Portrait)'}`,
-          icon: isSquare ? (
-            <SquareIcon className="h-4 w-4" />
-          ) : (
-            <LayoutGrid
-              className={`h-4 w-4 ${isPortrait ? 'rotate-90' : ''}`}
-            />
-          ),
         }
       })
-    : defaultAspectRatioOptions
+    : []
 
   // Determine which options to display
   const displayOptions = isUsingAspectRatio ? aspectRatioOptions : sizeOptions
@@ -284,13 +271,70 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       (option) =>
         option.value ===
         (isUsingAspectRatio ? selectedSize.replace('x', ':') : selectedSize),
-    ) || displayOptions[0]
+    ) || (displayOptions.length > 0 ? displayOptions[0] : null)
+
+  // To force UI update when model changes
+  useEffect(() => {
+    if (!currentModel) return
+
+    // When current model changes, ensure we're using a compatible size
+    const usesAspectRatio =
+      currentModel.supportedAspectRatios &&
+      currentModel.supportedAspectRatios.length > 0
+
+    // Check if current size is compatible with current model
+    let isSizeCompatible = false
+
+    if (usesAspectRatio && currentModel.supportedAspectRatios) {
+      const currentAspectRatio = selectedSize.replace('x', ':')
+      isSizeCompatible =
+        currentModel.supportedAspectRatios.includes(currentAspectRatio)
+    } else if (currentModel.supportedSizes) {
+      isSizeCompatible = currentModel.supportedSizes.includes(selectedSize)
+    }
+
+    // If size is not compatible, set to default
+    if (!isSizeCompatible) {
+      if (
+        usesAspectRatio &&
+        currentModel.supportedAspectRatios &&
+        currentModel.supportedAspectRatios.length > 0
+      ) {
+        const defaultRatio = currentModel.supportedAspectRatios[0]
+        onSizeChange(defaultRatio.replace(':', 'x') as ImageSize)
+      } else if (
+        currentModel.supportedSizes &&
+        currentModel.supportedSizes.length > 0
+      ) {
+        onSizeChange(currentModel.supportedSizes[0] as ImageSize)
+      }
+    }
+  }, [currentModel, selectedSize, onSizeChange])
 
   return (
     <div className="flex-shrink-0 z-10">
       <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
         <div className="relative w-full rounded-xl bg-accent/20 shadow-sm">
           <div className="flex items-center px-4 py-2 border-b border-accent/10">
+            {/* VE indicator with tooltip */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center mr-3 cursor-help">
+                    <Zap className="h-4 w-4 text-amber-400 mr-1" />
+                    <span className="text-sm text-foreground/70">6 VE</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>
+                    Vibe Energy: Used for image generation. Replenishes daily.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <div className="mx-2 h-4 border-r border-accent/20" />
+
             {/* Model selector */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -300,12 +344,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                   className="h-8 gap-2 text-sm text-foreground/70 rounded-full hover:bg-accent/40"
                 >
                   <BrainCircuit className="h-3.5 w-3.5" />
-                  <span className="max-w-[120px] truncate">
+                  <span className="max-w-[160px] truncate">
                     {currentModel?.label || 'Select model'}
                   </span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuContent align="start" className="w-[300px]">
                 <DropdownMenuLabel>AI Model</DropdownMenuLabel>
                 <DropdownMenuRadioGroup
                   value={currentModel?.value || ''}
@@ -317,7 +361,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                       value={model.value}
                       disabled={modelsLoading}
                     >
-                      {model.label}
+                      <div className="flex flex-col items-start">
+                        <div className="font-medium">{model.label}</div>
+                        <div className="text-xs text-muted-foreground w-full truncate">
+                          {model.value}
+                        </div>
+                      </div>
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
@@ -326,7 +375,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
             <div className="mx-2 h-4 border-r border-accent/20" />
 
-            {/* Size/Aspect Ratio selector */}
+            {/* Size/Aspect Ratio selector with improved design */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -336,8 +385,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 >
                   <LayoutGrid className="h-3.5 w-3.5" />
                   <span>
-                    {currentOption?.label ||
-                      (isUsingAspectRatio ? 'Aspect Ratio' : 'Size')}
+                    {isUsingAspectRatio
+                      ? selectedSize.replace('x', ':')
+                      : selectedSize}
                   </span>
                 </Button>
               </DropdownMenuTrigger>
@@ -363,25 +413,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     <DropdownMenuRadioItem
                       key={option.value}
                       value={option.value}
-                      className="flex items-center"
                     >
-                      <span className="mr-2">{option.icon}</span>
                       {option.label}
                     </DropdownMenuRadioItem>
                   ))}
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-
-            <div className="ml-auto">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 rounded-full hover:bg-accent/40"
-              >
-                <Settings className="h-3.5 w-3.5 text-foreground/70" />
-              </Button>
-            </div>
           </div>
 
           <div className="px-4 py-3 flex">
@@ -401,24 +439,23 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           <div className="px-4 py-2 flex justify-end border-t border-accent/10">
             <Button
               type="submit"
-              disabled={!inputValue.trim() || isSubmitting}
+              variant={isSubmitting ? 'outline' : 'default'}
+              size="lg"
               className={cn(
-                'rounded-full h-8 gap-1.5 px-4 transition-all',
-                !inputValue.trim() && 'opacity-70',
+                'rounded-full px-5 transition-all duration-300',
+                isSubmitting ? 'w-36' : 'w-auto',
               )}
-              size="sm"
+              disabled={!inputValue.trim() || isSubmitting || !currentModel}
             >
               {isSubmitting ? (
-                <div className="flex space-x-1">
-                  <div className="h-1.5 w-1.5 bg-primary-foreground/80 rounded-full animate-bounce" />
-                  <div className="h-1.5 w-1.5 bg-primary-foreground/80 rounded-full animate-bounce [animation-delay:150ms]" />
-                  <div className="h-1.5 w-1.5 bg-primary-foreground/80 rounded-full animate-bounce [animation-delay:300ms]" />
-                </div>
+                <span className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Generating
+                </span>
               ) : (
-                <>
-                  <span>Generate</span>
-                  <SendHorizontal className="h-3.5 w-3.5" />
-                </>
+                <span className="flex items-center gap-2">
+                  <SendHorizontal className="h-4 w-4" />
+                  Generate
+                </span>
               )}
             </Button>
           </div>

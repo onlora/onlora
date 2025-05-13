@@ -20,7 +20,7 @@ export async function findUserById(userId: string): Promise<UserSelect | null> {
 }
 
 interface JamCore {
-  id: number
+  id: string
   userId: string | null
 }
 
@@ -33,13 +33,13 @@ interface JamCore {
  */
 export async function verifyUserJamOwnership(
   userId: string,
-  jamId: number,
+  jamId: string,
 ): Promise<{
   jamExists: boolean
   isOwner: boolean
   jam?: JamCore
 }> {
-  if (Number.isNaN(jamId)) {
+  if (!jamId) {
     return { jamExists: false, isOwner: false }
   }
 

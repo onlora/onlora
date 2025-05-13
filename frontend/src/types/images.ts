@@ -27,6 +27,15 @@ export interface MessageImage {
 }
 
 /**
+ * API message format for multi-modal models
+ */
+export interface ApiMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  name?: string
+}
+
+/**
  * Parameters for generating images from an AI model
  */
 export interface GenerateImageParams {
@@ -36,7 +45,7 @@ export interface GenerateImageParams {
   size?: string
   aspectRatio?: string
   isMultiModalLanguageModel?: boolean
-  messages?: Message[]
+  messages?: ApiMessage[]
 }
 
 /**

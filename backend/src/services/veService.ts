@@ -27,7 +27,7 @@ export async function deductVibeEnergy(
   userId: string,
   amountToDeduct: number,
   reason: string,
-  refId: number, // Changed to number, as veTxns.refId is bigint {mode: 'number'}
+  refId: string, // Changed to string to support UUID format
 ): Promise<VEDeductionResult> {
   if (amountToDeduct <= 0) {
     logger.warn(
@@ -103,7 +103,7 @@ export async function deductVibeEnergy(
         userId,
         delta: -amountToDeduct, // Store as negative for deduction
         reason,
-        refId, // Use number directly as Drizzle expects number for {mode: 'number'}
+        refId, // Now a string (UUID format)
       })
       logger.info(
         { userId, amount: -amountToDeduct, reason, refId },

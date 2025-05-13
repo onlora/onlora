@@ -1,8 +1,7 @@
 'use client'
 
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import type { Message, MessageImage } from '@/lib/api/jamApi'
 import { cn } from '@/lib/utils'
+import type { Message, MessageImage } from '@/types/images'
 import type React from 'react'
 
 interface MessageListProps {
@@ -18,34 +17,25 @@ export const MessageList: React.FC<MessageListProps> = ({
   onImageClick = () => {},
   isPanelOpen = false,
 }) => {
-  // These would be replaced with actual user data from context
-  const userAvatarUrl = 'https://placehold.co/40x40/purple/white?text=U'
-  const aiAvatarUrl = 'https://placehold.co/40x40/teal/white?text=AI'
-
   return (
     <div className="w-full h-full py-4 px-4 sm:px-6">
-      <div className="max-w-4xl mx-auto flex flex-col space-y-8">
+      <div className="max-w-4xl mx-auto flex flex-col space-y-4">
         {messages.map((message) => (
           <div
             key={message.id}
             className={cn(
-              'flex items-start gap-3',
+              'flex items-start',
               message.role === 'user' ? 'justify-end' : 'justify-start',
             )}
           >
-            {message.role === 'ai' && (
-              <Avatar className="h-9 w-9 shadow-sm border-2 border-accent bg-accent/30">
-                <AvatarImage src={aiAvatarUrl} alt="AI Avatar" />
-                <AvatarFallback>AI</AvatarFallback>
-              </Avatar>
-            )}
-
             <div
               className={cn(
-                'max-w-[75%] rounded-2xl px-5 py-3.5',
+                'max-w-[85%] rounded-2xl px-5 py-3.5',
                 message.role === 'user'
-                  ? 'bg-primary/90 text-primary-foreground shadow-md'
+                  ? 'bg-primary/90 text-primary-foreground shadow-sm'
                   : 'bg-accent/40 text-foreground shadow-sm',
+                // Add different border radius for user vs AI messages
+                message.role === 'user' ? 'rounded-tr-sm' : 'rounded-tl-sm',
               )}
             >
               {message.text && (
@@ -94,23 +84,12 @@ export const MessageList: React.FC<MessageListProps> = ({
                 </div>
               )}
             </div>
-
-            {message.role === 'user' && (
-              <Avatar className="h-9 w-9 shadow-sm border-2 border-primary/30 bg-primary/10">
-                <AvatarImage src={userAvatarUrl} alt="User Avatar" />
-                <AvatarFallback>U</AvatarFallback>
-              </Avatar>
-            )}
           </div>
         ))}
 
         {isLoading && (
-          <div className="flex justify-start items-start gap-3">
-            <Avatar className="h-9 w-9 shadow-sm border-2 border-accent bg-accent/30">
-              <AvatarImage src={aiAvatarUrl} alt="AI Avatar" />
-              <AvatarFallback>AI</AvatarFallback>
-            </Avatar>
-            <div className="bg-accent/40 text-foreground shadow-sm rounded-2xl px-5 py-3.5">
+          <div className="flex justify-start items-start">
+            <div className="bg-accent/40 text-foreground shadow-sm rounded-2xl rounded-tl-sm px-5 py-3.5">
               <div className="flex space-x-2 items-center">
                 <div className="h-2.5 w-2.5 bg-muted-foreground/40 rounded-full animate-bounce" />
                 <div className="h-2.5 w-2.5 bg-muted-foreground/40 rounded-full animate-bounce [animation-delay:200ms]" />

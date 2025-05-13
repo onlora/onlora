@@ -1131,7 +1131,7 @@ const VeTransactionItemSchema = z.object({
   userId: z.string(),
   delta: z.number().int(),
   reason: z.string().nullable(),
-  refId: z.number().int().positive().nullable(),
+  refId: z.string().uuid().nullable(),
   createdAt: z.string(), // ISO string
 })
 

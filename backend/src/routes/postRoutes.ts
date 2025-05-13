@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto' // For generating UUIDs
 import { zValidator } from '@hono/zod-validator'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { type Context, Hono } from 'hono'
@@ -15,26 +16,54 @@ import {
   visibilityEnum,
 } from '../db/schema' // Adjust path as needed
 import { comments as commentsSchema } from '../db/schema' // Import schema explicitly for typing
+import { uploadBufferToR2 } from '../lib/r2' // Import R2 upload function
 import {
   type AuthenticatedContextEnv,
   optionalAuthMiddleware,
   requireAuthMiddleware,
 } from '../middleware/auth' // Changed to AuthenticatedContextEnv
+import { createComment, createCommentSchema } from '../services/commentService' // Import from service
 
-// Zod schema for post creation payload
+// UUID validation pattern
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+// Define type for image data
+interface ImageData {
+  id?: string
+  data: string // base64 data or URL
+  altText?: string
+}
+
+// Zod schema for post creation payload with direct image data
 const createPostSchema = z.object({
   title: z.string().min(1, 'Title is required').max(255),
   description: z.string().max(10000).optional(), // Corresponds to bodyMd
   tags: z.array(z.string().max(50)).max(10).optional().default([]),
   visibility: z.enum(visibilityEnum.enumValues), // Use the enum from schema
-  imageIds: z
-    .array(z.number().int().positive())
+  images: z
+    .array(
+      z.object({
+        id: z.string().optional(), // Optional ID if exists
+        data: z.string(), // base64 data or URL
+        altText: z.string().optional(),
+      }),
+    )
     .min(1, 'At least one image is required')
-    .max(10), // Max 10 images per post
-  jamId: z.number().int().positive().optional(), // Optional: to link post back to its origin jam
+    .max(10),
+  jamId: z
+    .string()
+    .regex(uuidPattern, 'Jam ID must be a valid UUID')
+    .optional(), // Optional: to link post back to its origin jam
   // Remix-specific fields (optional)
-  parentPostId: z.number().int().positive().optional(),
-  rootPostId: z.number().int().positive().optional(),
+  parentPostId: z
+    .string()
+    .regex(uuidPattern, 'Parent Post ID must be a valid UUID')
+    .optional(),
+  rootPostId: z
+    .string()
+    .regex(uuidPattern, 'Root Post ID must be a valid UUID')
+    .optional(),
   generation: z.number().int().nonnegative().optional(),
 })
 
@@ -44,10 +73,7 @@ type CreatePostValidatedData = z.infer<typeof createPostSchema>
 
 // Zod schema for postId param
 const postIdParamSchema = z.object({
-  postId: z
-    .string()
-    .regex(/^\d+$/, 'Post ID must be a positive integer.')
-    .transform(Number),
+  postId: z.string().regex(uuidPattern, 'Post ID must be a valid UUID'),
 })
 
 // --- Zod schema for the response of the clone endpoint ---
@@ -55,16 +81,20 @@ const postCloneDataSchema = z.object({
   title: z.string().optional(), // e.g., "Remix: Original Title"
   tags: z.array(z.string()).optional(),
   coverImgUrl: z.string().url().optional(),
-  // imageIds: z.array(z.number().int().positive()).optional(), // If we decide to clone image associations by ID
-  parentPostId: z.number().int().positive(),
-  rootPostId: z.number().int().positive(),
+  // imageIds: z.array(z.string().regex(uuidPattern)).optional(), // If we decide to clone image associations by ID
+  parentPostId: z
+    .string()
+    .regex(uuidPattern, 'Parent Post ID must be a valid UUID'),
+  rootPostId: z
+    .string()
+    .regex(uuidPattern, 'Root Post ID must be a valid UUID'),
   generation: z.number().int().nonnegative(),
   // Potentially a snippet of bodyMd if desired
 })
 
 // Define a type for individual tree nodes
 interface RemixNodeSelf {
-  id: number
+  id: string
   title: string | null
   author: {
     id: string
@@ -72,7 +102,7 @@ interface RemixNodeSelf {
     name: string | null
     image: string | null
   } | null
-  parentId: number | null
+  parentId: string | null
   coverImg: string | null
   createdAt: string | null // Expect ISO string or null
   remixes: RemixNodeSelf[]
@@ -80,7 +110,7 @@ interface RemixNodeSelf {
 
 const RemixTreeNodeSchema: z.ZodType<RemixNodeSelf> = z.lazy(() =>
   z.object({
-    id: z.number(),
+    id: z.string(),
     title: z.string().nullable(),
     author: z
       .object({
@@ -90,7 +120,7 @@ const RemixTreeNodeSchema: z.ZodType<RemixNodeSelf> = z.lazy(() =>
         image: z.string().nullable(),
       })
       .nullable(),
-    parentId: z.number().nullable(),
+    parentId: z.string().nullable(),
     coverImg: z.string().nullable(),
     createdAt: z.string().nullable(), // Expect ISO string or null
     remixes: z.array(RemixTreeNodeSchema),
@@ -99,7 +129,7 @@ const RemixTreeNodeSchema: z.ZodType<RemixNodeSelf> = z.lazy(() =>
 
 // Define the overall API response schema
 const RemixTreeResponseSchema = z.object({
-  currentPostId: z.number(),
+  currentPostId: z.string(),
   lineage: z.array(RemixTreeNodeSchema),
   tree: RemixTreeNodeSchema,
 })
@@ -120,7 +150,7 @@ const postRoutes = new Hono<PostRoutesAppEnv>()
 // Manually define the expected shape based on the query with relations
 // Adjust field nullability based on your schema and query logic
 interface PostQueryResult {
-  id: number
+  id: string
   title: string | null
   bodyMd: string | null
   tags: string[] | null
@@ -132,8 +162,8 @@ interface PostQueryResult {
   commentCount: number | null
   remixCount: number | null
   viewCount: number | null
-  parentPostId: number | null
-  rootPostId: number | null
+  parentPostId: string | null
+  rootPostId: string | null
   generation: number | null
   author: {
     id: string
@@ -142,18 +172,18 @@ interface PostQueryResult {
     image: string | null
   } | null
   postImages: Array<{
-    id: number // id of the post_images record
+    id: string // id of the post_images record
     // postId: number // Redundant as it's part of the main post
-    imageId: number // id of the actual image
+    imageId: string // id of the actual image
     // createdAt: Date | null // Timestamp of the post_images record
     image: {
-      id: number
+      id: string
       url: string
       // We could add prompt, model from images table if needed here
     } | null // The actual image object from the images table
   }>
   parentPost?: {
-    id: number
+    id: string
     title: string | null
     author: {
       id: string
@@ -165,16 +195,16 @@ interface PostQueryResult {
   isLiked?: boolean
   isBookmarked?: boolean
   // This will be the transformed array of actual image objects for the client
-  imagesForClient?: Array<{ id: number; url: string }>
+  imagesForClient?: Array<{ id: string; url: string }>
 }
 
 // --- Helper Type for Comment Query Result ---
 // Manually define the expected shape of a comment with its user relation
 interface CommentWithUser {
-  id: number
-  postId: number
+  id: string
+  postId: string
   userId: string | null
-  parentId: number | null
+  parentId: string | null
   body: string
   createdAt: Date | null
   user: {
@@ -184,6 +214,75 @@ interface CommentWithUser {
     image: string | null
     username: string | null
   } | null // User might be null if userId is null in comments table
+}
+
+// Process image data and upload to R2 if needed
+async function processImage(
+  imageData: ImageData,
+): Promise<{ id: string; url: string } | null> {
+  try {
+    // Generate random ID if not provided
+    const imageId = imageData.id || randomUUID()
+
+    // If image already exists in our database, return its URL instead of uploading again
+    if (imageData.id) {
+      const existingImage = await db.query.images.findFirst({
+        where: eq(images.id, imageId),
+        columns: { url: true },
+      })
+
+      if (existingImage) {
+        console.log(
+          `Image ${imageId} already exists, reusing URL: ${existingImage.url}`,
+        )
+        return {
+          id: imageId,
+          url: existingImage.url,
+        }
+      }
+    }
+
+    // If it's a base64 image, upload to R2
+    if (imageData.data.startsWith('data:image/')) {
+      // Extract image data and MIME type
+      const matches = imageData.data.match(/^data:([A-Za-z-+/]+);base64,(.+)$/)
+
+      if (!matches || matches.length !== 3) {
+        console.error('Invalid base64 format for image')
+        return null
+      }
+
+      const contentType = matches[1]
+      const base64Data = matches[2]
+      const imageBuffer = Buffer.from(base64Data, 'base64')
+
+      // Upload to R2
+      const r2Result = await uploadBufferToR2(
+        imageBuffer,
+        contentType,
+        `${imageId}.${contentType.split('/')[1] || 'png'}`,
+      )
+
+      if (!r2Result?.publicUrl) {
+        console.error('Failed to upload image to R2')
+        return null
+      }
+
+      return {
+        id: imageId,
+        url: r2Result.publicUrl,
+      }
+    }
+
+    // If it's already a URL, just use it directly
+    return {
+      id: imageId,
+      url: imageData.data,
+    }
+  } catch (error) {
+    console.error('Error processing image:', error)
+    return null
+  }
 }
 
 // POST /api/posts - Create a new post
@@ -212,18 +311,54 @@ postRoutes.post(
       const jsonPayload = await c.req.json()
       const payload = createPostSchema.parse(jsonPayload)
 
-      const firstImageId = payload.imageIds[0]
-      const coverImageRecord = await db.query.images.findFirst({
-        where: eq(images.id, firstImageId),
-        columns: { url: true },
-      })
-
-      if (!coverImageRecord || !coverImageRecord.url) {
-        return c.json({ error: 'Cover image not found or URL is missing' }, 400)
+      // Process the provided images
+      const processedImages: Array<{ id: string; url: string }> = []
+      for (const imageData of payload.images) {
+        const result = await processImage(imageData)
+        if (result) {
+          processedImages.push(result)
+        }
       }
-      const coverImgUrl = coverImageRecord.url
+
+      if (processedImages.length === 0) {
+        return c.json(
+          {
+            error: 'No valid images processed',
+            details: 'Could not process any of the provided images',
+          },
+          400,
+        )
+      }
+
+      // Use the first processed image as the cover
+      const coverImage = processedImages[0]
+      const coverImgUrl = coverImage.url
 
       const result = await db.transaction(async (tx) => {
+        // Track successfully processed image IDs to link with post
+        const processedImageIds: string[] = []
+
+        // Store all processed images in the images table using upsert
+        for (const img of processedImages) {
+          // Use onConflictDoNothing to gracefully handle existing images
+          await tx
+            .insert(images)
+            .values({
+              id: img.id,
+              url: img.url,
+              jamId: payload.jamId,
+              isPublic: payload.visibility === 'public',
+              prompt:
+                payload.images.find((i) => i.id === img.id)?.altText ||
+                payload.title,
+              createdAt: new Date(),
+            })
+            .onConflictDoNothing({ target: images.id })
+
+          // Always add to our list to link with the post
+          processedImageIds.push(img.id)
+        }
+
         // 1. Insert the new post
         const [newPost] = await tx
           .insert(posts)
@@ -234,7 +369,7 @@ postRoutes.post(
             tags: payload.tags,
             visibility: payload.visibility,
             coverImg: coverImgUrl,
-            jamSessionId: payload.jamId,
+            jamId: payload.jamId,
             // Add remix fields if they exist
             parentPostId: payload.parentPostId,
             rootPostId: payload.rootPostId,
@@ -247,10 +382,11 @@ postRoutes.post(
         }
         const postId = newPost.id
 
-        // 2. Link images to the post
-        const postImageEntries = payload.imageIds.map((imageId) => ({
+        // 2. Link images to the post - use our tracked processedImageIds
+        // which includes both newly inserted and existing images
+        const postImageEntries = processedImageIds.map((imgId) => ({
           postId: postId,
-          imageId: imageId,
+          imageId: imgId,
         }))
         await tx.insert(postImages).values(postImageEntries)
 
@@ -268,14 +404,6 @@ postRoutes.post(
             reason: 'publish_public_post', // Standardized reason
             refId: postId,
           })
-
-          // Also set images to public
-          if (payload.imageIds.length > 0) {
-            await tx
-              .update(images)
-              .set({ isPublic: true })
-              .where(sql`${images.id} IN ${payload.imageIds}`)
-          }
         }
 
         // 4. Handle Remix-specific updates (if parentPostId is provided AND the new post is public)
@@ -445,7 +573,7 @@ postRoutes.get(
       // Transform postImages to a cleaner array of image objects for the client
       const imagesForClient = (postData.postImages || [])
         .map((pi) => pi.image)
-        .filter((img): img is { id: number; url: string } => img !== null)
+        .filter((img): img is { id: string; url: string } => img !== null)
 
       const response: PostQueryResult = {
         ...(postData as PostQueryResult),
@@ -545,7 +673,7 @@ postRoutes.get(
     }
   }),
   async (c: Context<PostRoutesAppEnv>) => {
-    let postId: number
+    let postId: string
     try {
       const params = postIdParamSchema.parse(c.req.param())
       postId = params.postId
@@ -586,6 +714,53 @@ postRoutes.get(
     } catch (error) {
       console.error(`Error fetching comments for post ${postId}:`, error)
       throw new HTTPException(500, { message: 'Failed to fetch comments' })
+    }
+  },
+)
+
+// POST /api/posts/:postId/comments - Add a comment to a post
+postRoutes.post(
+  '/:postId/comments',
+  requireAuthMiddleware,
+  zValidator('param', postIdParamSchema),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      return c.json({ error: 'Authentication required' }, 401)
+    }
+    const userId = user.id
+
+    try {
+      const { postId } = c.req.valid('param')
+
+      // Get the JSON payload from the request
+      const jsonPayload = await c.req.json()
+
+      // Add the postId from the route parameter
+      const commentPayload = {
+        ...jsonPayload,
+        postId,
+      }
+
+      // Validate the combined payload using the schema from commentRoutes
+      const parsedPayload = createCommentSchema.parse(commentPayload)
+
+      // Use the shared function from commentRoutes to handle all the comment creation logic
+      const result = await createComment(parsedPayload, userId)
+
+      return c.json(result)
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return c.json(
+          { error: 'Validation failed', details: error.flatten() },
+          400,
+        )
+      }
+      if (error instanceof HTTPException) {
+        return c.json({ error: error.message }, error.status)
+      }
+      console.error('Error creating comment:', error)
+      return c.json({ error: 'Failed to create comment' }, 500)
     }
   },
 )
@@ -967,9 +1142,9 @@ postRoutes.get(
 
     try {
       type FetchedPostNode = {
-        id: number
+        id: string
         title: string | null
-        parentId: number | null // This will be mapped from parentPostId
+        parentId: string | null // This will be mapped from parentPostId
         coverImg: string | null
         createdAt: Date | null // Date from DB
         author: {
@@ -981,7 +1156,7 @@ postRoutes.get(
       }
 
       const fetchPostNodeData = async (
-        pId: number,
+        pId: string,
       ): Promise<FetchedPostNode | null> => {
         const post = await db.query.posts.findFirst({
           where: eq(posts.id, pId),
@@ -1038,7 +1213,7 @@ postRoutes.get(
       }
 
       const buildRemixTree = async (
-        pId: number,
+        pId: string,
       ): Promise<RemixNodeSelf | null> => {
         const nodeData = await fetchPostNodeData(pId)
         if (!nodeData) return null

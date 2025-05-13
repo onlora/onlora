@@ -203,6 +203,10 @@ class ImageGenerationService {
         ...((params.providerOptions as Record<string, unknown>) || {}),
         responseModalities: ['TEXT', 'IMAGE'],
       }
+
+      logger.info(
+        'Configured Google Gemini with responseModalities: TEXT,IMAGE',
+      )
     } else if (params.providerOptions) {
       providerOptions[params.modelProvider] = params.providerOptions as Record<
         string,
@@ -210,16 +214,32 @@ class ImageGenerationService {
       >
     }
 
+    // Create a deep copy of the messages array to avoid modifying the original
+    const messagesWithCurrentPrompt = params.messages
+      ? [
+          ...params.messages,
+          // Append the current prompt as a user message
+          {
+            role: 'user' as const,
+            content: params.prompt,
+          },
+        ]
+      : undefined
+
     // Choose between conversation history or single prompt
     let textGenOptions: TextGenOptions
 
-    if (params.messages && params.messages.length > 0) {
-      // Use conversation history
+    if (messagesWithCurrentPrompt && messagesWithCurrentPrompt.length > 0) {
+      // Use conversation history with current prompt
       textGenOptions = {
         model,
-        messages: params.messages,
+        messages: messagesWithCurrentPrompt,
         providerOptions,
       }
+
+      logger.info(
+        `Using multi-modal model with conversation history (${messagesWithCurrentPrompt.length} messages) including current prompt: "${params.prompt.substring(0, 50)}${params.prompt.length > 50 ? '...' : ''}"`,
+      )
     } else {
       // Use single prompt
       textGenOptions = {
@@ -227,42 +247,70 @@ class ImageGenerationService {
         prompt: params.prompt,
         providerOptions,
       }
+
+      logger.info(
+        `Using multi-modal model with single prompt: "${params.prompt.substring(0, 50)}${params.prompt.length > 50 ? '...' : ''}"`,
+      )
     }
 
-    const result = await generateText(
-      textGenOptions as unknown as Parameters<typeof generateText>[0],
-    )
-
-    // Get text response
-    const text = result.text
-
-    // Extract images from files property
-    if (result.files?.length > 0) {
-      const imageFiles = result.files.filter((file) =>
-        file.mimeType?.startsWith('image/'),
+    try {
+      logger.info(
+        `Sending request to ${params.modelProvider}/${params.modelId} for image generation`,
       )
 
-      return {
-        text,
-        images: imageFiles.map((file) => ({
-          base64: file.base64,
-          uint8Array: file.uint8Array,
-          mimeType: file.mimeType,
-        })),
-        warnings: [],
-      }
-    }
+      logger.info(`textGenOptions: ${JSON.stringify(textGenOptions, null, 2)}`)
 
-    // If we got text but no images, return just the text
-    if (text) {
+      const result = await generateText(
+        textGenOptions as unknown as Parameters<typeof generateText>[0],
+      )
+
+      // Get text response
+      const text = result.text
+
+      // Extract images from files property
+      if (result.files?.length > 0) {
+        const imageFiles = result.files.filter((file) =>
+          file.mimeType?.startsWith('image/'),
+        )
+
+        logger.info(`Found ${imageFiles.length} image files in response`)
+
+        if (imageFiles.length === 0) {
+          logger.warn(
+            `No image files found in response from ${params.modelProvider}/${params.modelId}`,
+          )
+        }
+
+        return {
+          text,
+          images: imageFiles.map((file) => ({
+            base64: file.base64,
+            uint8Array: file.uint8Array,
+            mimeType: file.mimeType,
+          })),
+          warnings: [],
+        }
+      }
+
+      // Log the absence of files
+      logger.warn(
+        `No files property found in response from ${params.modelProvider}/${params.modelId}`,
+      )
+
+      // If we got text but no images, return just the text
       return {
         text,
         images: [],
-        warnings: [],
+        warnings: [
+          'No images were generated. The model responded with text only.',
+        ],
       }
+    } catch (error) {
+      logger.error(
+        `Error generating images with language model: ${(error as Error).message}`,
+      )
+      throw error
     }
-
-    throw new Error('No content was generated from the language model')
   }
 }
 

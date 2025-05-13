@@ -1,16 +1,23 @@
 import type { PostVisibility } from '@/components/jam/PublishSheet' // Assuming this type is 'public' | 'private'
 import { apiClient } from './apiClient' // Import new client and error type
 
+// Image data for post creation
+export interface PostImageData {
+  id?: string
+  data: string // base64 data or URL
+  altText?: string
+}
+
 export interface CreatePostPayload {
   title: string
   description?: string
   tags?: string[]
   visibility: PostVisibility
-  imageIds: string[] // Changed from number[] to string[] to match UUID format
+  images: PostImageData[] // New format: array of image data objects
   jamId?: string // Changed from number to string to match UUID format
   // Remix fields
-  parentPostId?: number
-  rootPostId?: number
+  parentPostId?: string // Changed from number to string to match UUID format
+  rootPostId?: string // Changed from number to string to match UUID format
   generation?: number
 }
 

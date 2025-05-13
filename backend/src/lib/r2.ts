@@ -94,14 +94,12 @@ interface UploadResult {
  * @param buffer The data to upload.
  * @param contentType The MIME type of the content (e.g., 'image/png').
  * @param desiredFileName Optional: a specific file name (e.g., 'my-image.png'). If not provided, a random one is generated.
- * @param keyPrefix The prefix for the S3 key (e.g., 'uploads/user123/'). Defaults to 'general-uploads/'.
  * @returns Promise<UploadResult | null>
  */
 export const uploadBufferToR2 = async (
   buffer: Buffer,
   contentType: string,
   desiredFileName?: string,
-  keyPrefix = 'general-uploads/',
 ): Promise<UploadResult | null> => {
   if (!r2Configured || !config.r2BucketName || !config.r2PublicUrlBase) {
     logger.error(
@@ -117,17 +115,14 @@ export const uploadBufferToR2 = async (
       fileName = `${crypto.randomBytes(16).toString('hex')}.${fileExtension}`
     }
 
-    const key = `${keyPrefix.replace(/\/$/, '')}/${fileName}`.replace(
-      /^\/+/,
-      '',
-    ) // Ensure no leading/double slashes
+    const key = fileName.replace(/^\/+/, '') // Ensure no leading slashes
 
     const command = new PutObjectCommand({
       Bucket: config.r2BucketName,
       Key: key,
       Body: buffer,
       ContentType: contentType,
-      // ACL: 'public-read', // R2 doesn't use S3 ACLs like this; public access is via bucket settings or Cloudflare Access
+      ACL: 'public-read',
     })
 
     const response = await s3Client.send(command)
@@ -142,7 +137,7 @@ export const uploadBufferToR2 = async (
     return { publicUrl, key, eTag: response.ETag }
   } catch (error: unknown) {
     const errToLog = error instanceof Error ? error : new Error(String(error))
-    logger.error({ err: errToLog, keyPrefix }, 'Error uploading buffer to R2')
+    logger.error({ err: errToLog }, 'Error uploading buffer to R2')
     return null
   }
 }

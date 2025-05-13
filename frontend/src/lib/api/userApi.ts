@@ -349,7 +349,7 @@ export interface VeTransactionItem {
   userId: string
   delta: number
   reason: string | null
-  refId: number | null
+  refId: string | null
   createdAt: string // ISO Date string
 }
 

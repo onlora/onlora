@@ -1,5 +1,5 @@
-import { google } from '@ai-sdk/google'
-import { openai } from '@ai-sdk/openai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI, openai } from '@ai-sdk/openai'
 import {
   type CoreMessage,
   type GenerateTextResult,
@@ -23,9 +23,9 @@ const logger = pino({
 if (!config.openaiApiKey) {
   logger.warn('OPENAI_API_KEY not set. OpenAI models will not be available.')
 }
-if (!config.googleApiKey) {
+if (!config.googleGenerativeAiApiKey) {
   logger.warn(
-    'GOOGLE_API_KEY not set. Google Gemini models will not be available.',
+    'GOOGLE_GENERATIVE_AI_API_KEY not set. Google Gemini models will not be available.',
   )
 }
 
@@ -79,20 +79,28 @@ export const generateContentWithLLM = async (
   let model: LanguageModel
 
   switch (modelProvider) {
-    case 'openai':
+    case 'openai': {
       if (!config.openaiApiKey) {
         logger.error('OpenAI API Key not configured for generateText.')
         return null
       }
-      model = openai(modelId)
+      const openaiProvider = createOpenAI({
+        apiKey: config.openaiApiKey,
+      })
+      model = openaiProvider(modelId)
       break
-    case 'google':
-      if (!config.googleApiKey) {
+    }
+    case 'google': {
+      if (!config.googleGenerativeAiApiKey) {
         logger.error('Google API Key not configured for generateText.')
         return null
       }
-      model = google(modelId)
+      const googleProvider = createGoogleGenerativeAI({
+        apiKey: config.googleGenerativeAiApiKey,
+      })
+      model = googleProvider(modelId)
       break
+    }
     default:
       logger.error(
         `Unsupported model provider for generateText: ${modelProvider}`,
