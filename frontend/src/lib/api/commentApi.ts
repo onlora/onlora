@@ -12,10 +12,10 @@ export interface CommentAuthor {
 
 // Matches the comment structure returned by the backend
 export interface CommentWithAuthor {
-  id: number
-  postId: number
+  id: string
+  postId: string
   userId: string | null
-  parentId: number | null
+  parentId: string | null
   body: string
   createdAt: string | null // Date comes as string
   author: CommentAuthor | null // User who wrote the comment
@@ -24,9 +24,9 @@ export interface CommentWithAuthor {
 
 // Payload for creating a new comment
 export interface CreateCommentPayload {
-  postId: number
+  postId: string
   body: string
-  parentId?: number // For replies
+  parentId?: string // For replies
 }
 
 // API_BASE_URL is now in apiClient.ts
@@ -39,7 +39,7 @@ export interface CreateCommentPayload {
 export async function getComments(
   postId: string,
 ): Promise<CommentWithAuthor[]> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided.')
   }
   return apiClient<CommentWithAuthor[]>(`/posts/${postId}/comments`)

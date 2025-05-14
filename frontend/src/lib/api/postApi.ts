@@ -16,13 +16,13 @@ export interface CreatePostPayload {
   images: PostImageData[] // New format: array of image data objects
   jamId?: string // Changed from number to string to match UUID format
   // Remix fields
-  parentPostId?: string // Changed from number to string to match UUID format
-  rootPostId?: string // Changed from number to string to match UUID format
+  parentPostId?: string
+  rootPostId?: string
   generation?: number
 }
 
 export interface CreatePostResponse {
-  postId: number
+  postId: string
   // Potentially other fields the backend might return upon successful creation
 }
 
@@ -46,12 +46,12 @@ export interface PostAuthor {
 }
 
 export interface PostImage {
-  id: string // Changed from number to string to match UUID format
+  id: string
   url: string
 }
 
 export interface PostDetails {
-  id: number
+  id: string
   title: string | null
   description: string | null // This is bodyMd from backend
   tags: string[] | null
@@ -64,15 +64,15 @@ export interface PostDetails {
   remixCount: number | null
   viewCount?: number | null
   bookmarkCount?: number | null
-  parentPostId: number | null
-  rootPostId: number | null
+  parentPostId: string | null
+  rootPostId: string | null
   generation: number | null
   author: PostAuthor | null
   images: PostImage[]
   isLiked?: boolean
   isBookmarked?: boolean // Ensure this is not optional if backend always sends it
   parentPost?: {
-    id: number
+    id: string
     title: string | null
     author: {
       id: string
@@ -87,7 +87,7 @@ export interface PostDetails {
  * Handles potential public/private visibility on the backend.
  */
 export async function getPostDetails(postId: string): Promise<PostDetails> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided.')
   }
   return apiClient<PostDetails>(`/posts/${postId}`, {
@@ -109,7 +109,7 @@ export interface ToggleLikeResponse {
 export async function toggleLikePost(
   postId: string,
 ): Promise<ToggleLikeResponse> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided.')
   }
   return apiClient<ToggleLikeResponse>(`/posts/${postId}/like`, {
@@ -132,7 +132,7 @@ export interface BookmarkActionResponse {
 export async function bookmarkPost(
   postId: string,
 ): Promise<BookmarkActionResponse> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided for bookmarking.')
   }
   return apiClient<BookmarkActionResponse>(`/posts/${postId}/bookmark`, {
@@ -147,7 +147,7 @@ export async function bookmarkPost(
 export async function unbookmarkPost(
   postId: string,
 ): Promise<BookmarkActionResponse> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided for unbookmarking.')
   }
   return apiClient<BookmarkActionResponse>(`/posts/${postId}/bookmark`, {
@@ -162,8 +162,8 @@ export interface PostCloneInfo {
   title: string | undefined // Updated to match backend response
   tags: string[] | undefined
   coverImgUrl: string | undefined
-  parentPostId: number
-  rootPostId: number
+  parentPostId: string
+  rootPostId: string
   generation: number
 }
 
@@ -171,7 +171,7 @@ export interface PostCloneInfo {
  * Fetches information needed to start remixing a post.
  */
 export async function getPostCloneInfo(postId: string): Promise<PostCloneInfo> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided for cloning.')
   }
   return apiClient<PostCloneInfo>(`/posts/${postId}/clone`, {
@@ -181,7 +181,7 @@ export async function getPostCloneInfo(postId: string): Promise<PostCloneInfo> {
 
 // --- Delete Post --- //
 export async function deleteMyPost(postId: string): Promise<void> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided for deletion.')
   }
   // Backend should handle auth and ownership
@@ -204,7 +204,7 @@ export async function updateMyPost(
   postId: string,
   payload: UpdatePostPayload,
 ): Promise<PostDetails> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided for update.')
   }
   if (Object.keys(payload).length === 0) {
@@ -221,17 +221,17 @@ export async function updateMyPost(
 // --- Remix Tree --- //
 
 export interface RemixTreeNode {
-  id: number
+  id: string
   title: string | null
   author: PostAuthor | null // Re-use PostAuthor type
-  parentId: number | null
+  parentId: string | null
   coverImg: string | null
   createdAt: string | null // ISO Date string
   remixes: RemixTreeNode[] // Recursive definition for children
 }
 
 export interface RemixTreeResponse {
-  currentPostId: number
+  currentPostId: string
   lineage: RemixTreeNode[] // Path from root to currentPost's parent
   tree: RemixTreeNode // The current post as the root of its own remix sub-tree
 }
@@ -240,7 +240,7 @@ export interface RemixTreeResponse {
  * Fetches the remix tree (lineage and descendants) for a given post.
  */
 export async function getRemixTree(postId: string): Promise<RemixTreeResponse> {
-  if (!postId || Number.isNaN(Number(postId))) {
+  if (!postId) {
     throw new Error('Invalid Post ID provided for fetching remix tree.')
   }
   // Assuming this endpoint might require authentication to see full details

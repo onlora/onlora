@@ -1,44 +1,24 @@
 'use client'
 
-import type { MessageImage } from '@/lib/api/jamApi'
 import { useSession } from '@/lib/authClient'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNowStrict } from 'date-fns'
 import {
   Bookmark,
-  Eye,
+  ChevronLeft,
+  ChevronRight,
   Heart,
-  Loader2,
   MessageSquare,
-  MoreHorizontal,
-  Repeat,
   Share2,
 } from 'lucide-react'
-import Image from 'next/image'
-import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useCallback, useMemo, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
 
-import CommentInput from '@/components/comments/CommentInput'
-import CommentItem from '@/components/comments/CommentItem'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 
-import { RemixTreeDisplay } from '@/components/posts/RemixTreeDisplay'
 import {
   type CommentWithAuthor,
   type CreateCommentPayload,
@@ -46,15 +26,20 @@ import {
   getComments,
 } from '@/lib/api/commentApi'
 import {
+  type PostDetails as BasePostDetails,
   type BookmarkActionResponse,
-  type PostDetails,
   type ToggleLikeResponse,
   bookmarkPost,
   getPostDetails,
-  getRemixTree,
   toggleLikePost,
   unbookmarkPost,
 } from '@/lib/api/postApi'
+
+// Extend the PostDetails type to include expected fields from the API response
+interface PostDetails extends BasePostDetails {
+  imagesForClient?: Array<{ id: string; url: string }>
+  bodyMd?: string | null
+}
 
 // Helper to get initials from name
 const getInitials = (name?: string | null) => {
@@ -66,7 +51,7 @@ const getInitials = (name?: string | null) => {
 
 // Type definition for the reply target state
 interface CommentReplyTarget {
-  id: number // ID of the comment being replied to
+  id: string // ID of the comment being replied to
   authorName: string // Name of the author being replied to
 }
 
@@ -101,6 +86,9 @@ export default function PostDetailPage() {
   )
   const commentInputRef = useRef<HTMLTextAreaElement>(null)
 
+  // Add state for current image index
+  const [currentImageIndex, setCurrentImageIndex] = useState(0)
+
   const {
     data: post,
     isLoading: isLoadingPost,
@@ -133,8 +121,8 @@ export default function PostDetailPage() {
 
   // Process comments for hierarchical display
   const { topLevelComments, commentsById } = useMemo(() => {
-    // Using Record for better type inference with numeric keys
-    const commentsByIdMap: Record<number, CommentWithAuthor> = {}
+    // Using Record for better type inference
+    const commentsByIdMap: Record<string, CommentWithAuthor> = {}
     const topLevelCommentsList: CommentWithAuthor[] = []
 
     if (!comments) {
@@ -152,8 +140,6 @@ export default function PostDetailPage() {
       if (comment.parentId === null) {
         topLevelCommentsList.push(commentsByIdMap[comment.id])
       }
-      // Note: We are NOT building a nested children array here.
-      // CommentItem will look up children using commentsByIdMap and comment.id
     }
 
     // Sort top-level by date
@@ -203,11 +189,11 @@ export default function PostDetailPage() {
       }
       return { previousPost }
     },
-    onSuccess: (data, _variables, context) => {
+    onSuccess: (data) => {
       if (postIdString) {
         queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
       }
-      toast.success(data.liked ? 'Post liked!' : 'Post unliked!')
+      toast.success(data.liked ? 'Post liked' : 'Post unliked')
     },
     onError: (err, _newLikeState, context) => {
       if (context?.previousPost && postIdString) {
@@ -216,7 +202,7 @@ export default function PostDetailPage() {
           context.previousPost,
         )
       }
-      toast.error('Failed to update like status. Please try again.')
+      toast.error('Failed to update like status')
       console.error('Like mutation error:', err)
     },
     onSettled: () => {
@@ -265,11 +251,11 @@ export default function PostDetailPage() {
       }
       return { previousPost }
     },
-    onSuccess: (data, _variables, context) => {
+    onSuccess: (data) => {
       if (postIdString) {
         queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
       }
-      toast.success(data.bookmarked ? 'Post bookmarked!' : 'Post unbookmarked!')
+      toast.success(data.bookmarked ? 'Post bookmarked' : 'Post unbookmarked')
     },
     onError: (err, _variables, context) => {
       if (context?.previousPost && postIdString) {
@@ -278,7 +264,7 @@ export default function PostDetailPage() {
           context.previousPost,
         )
       }
-      toast.error('Failed to update bookmark. Please try again.')
+      toast.error('Failed to update bookmark')
       console.error('Bookmark mutation error:', err)
     },
     onSettled: () => {
@@ -291,12 +277,12 @@ export default function PostDetailPage() {
   const createCommentMutation = useMutation<
     CommentWithAuthor,
     Error,
-    { body: string; parentId?: number | undefined },
-    { previousComments?: CommentWithAuthor[]; optimisticCommentId?: number }
+    { body: string; parentId?: string | undefined },
+    { previousComments?: CommentWithAuthor[]; optimisticCommentId?: string }
   >({
     mutationFn: async ({ body, parentId }) => {
       if (!post || !post.id) throw new Error('Post not loaded')
-      const payload: CreateCommentPayload = { postId: Number(post.id), body }
+      const payload: CreateCommentPayload = { postId: post.id, body }
       if (parentId !== undefined) {
         payload.parentId = parentId
       }
@@ -312,10 +298,10 @@ export default function PostDetailPage() {
           postIdString,
         ]) || []
 
-      const optimisticCommentId = Date.now()
+      const optimisticCommentId = Date.now().toString()
       const optimisticComment: CommentWithAuthor = {
         id: optimisticCommentId,
-        postId: Number(post.id),
+        postId: post.id,
         userId: currentUser.id,
         parentId: parentId ?? null,
         body: body,
@@ -352,7 +338,7 @@ export default function PostDetailPage() {
       if (postIdString) {
         queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
       }
-      toast.error('Failed to post comment. Please try again.')
+      toast.error('Failed to post comment')
       console.error('Create comment error:', err)
     },
     onSuccess: (newlyCreatedComment, _variables, context) => {
@@ -394,26 +380,21 @@ export default function PostDetailPage() {
   const handleCommentSubmit = useCallback(
     async (body: string) => {
       if (!post || !currentUser) {
-        toast.error('Cannot submit comment.')
+        toast.error('Cannot submit comment')
         return
       }
       if (!body.trim()) {
-        toast.error('Comment cannot be empty.')
+        toast.error('Comment cannot be empty')
         return
       }
 
-      const parentId: number | undefined = replyTarget
-        ? replyTarget.id
-        : undefined
+      const parentId = replyTarget ? replyTarget.id : undefined
 
       await createCommentMutation.mutate(
         { body, parentId },
         {
           onSuccess: () => {
             setReplyTarget(null)
-          },
-          onError: () => {
-            // Maybe clear reply target even on error?
           },
         },
       )
@@ -425,28 +406,23 @@ export default function PostDetailPage() {
     setReplyTarget(null)
   }, [])
 
-  const handleRemixClick = async () => {
-    if (!postIdString) return
-    router.push(`/jam/new?remixSourcePostId=${postIdString}`)
-  }
-
   const handleShareClick = () => {
     const url = window.location.href
     navigator.clipboard
       .writeText(url)
       .then(() => {
-        toast.success('Link copied to clipboard!')
+        toast.success('Link copied')
       })
       .catch((err) => {
         console.error('Failed to copy link: ', err)
-        toast.error('Failed to copy link.')
+        toast.error('Failed to copy link')
       })
   }
 
   const handleReplyClick = useCallback(
-    (commentId: number, authorName: string) => {
+    (commentId: string, authorName: string) => {
       if (!currentUser) {
-        toast.error('Please log in to reply.')
+        toast.error('Please log in to reply')
         return
       }
       setReplyTarget({ id: commentId, authorName })
@@ -461,325 +437,335 @@ export default function PostDetailPage() {
     [currentUser],
   )
 
+  // Handle image navigation
+  const handlePrevImage = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      const images = post?.imagesForClient
+      if (!images || images.length <= 1) return
+      setCurrentImageIndex((prev) =>
+        prev === 0 ? images.length - 1 : prev - 1,
+      )
+    },
+    [post],
+  )
+
+  const handleNextImage = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      const images = post?.imagesForClient
+      if (!images || images.length <= 1) return
+      setCurrentImageIndex((prev) =>
+        prev === images.length - 1 ? 0 : prev + 1,
+      )
+    },
+    [post],
+  )
+
+  const handleDotClick = useCallback(
+    (index: number) => {
+      const images = post?.imagesForClient
+      if (!images || index >= images.length) return
+      setCurrentImageIndex(index)
+    },
+    [post],
+  )
+
+  // Get current image URL
+  const currentImageUrl = useMemo(() => {
+    if (!post) return 'https://via.placeholder.com/800x600'
+
+    // Use imagesForClient array if available
+    const images = post.imagesForClient
+    if (images && images.length > 0) {
+      return images[currentImageIndex]?.url || post.coverImg
+    }
+
+    // Fallback to coverImg
+    return post.coverImg || 'https://via.placeholder.com/800x600'
+  }, [post, currentImageIndex])
+
+  // Total image count
+  const totalImages = useMemo(() => {
+    return post?.imagesForClient?.length || 0
+  }, [post])
+
+  // Error states
   if (!postIdString) {
     return (
-      <div className="container mx-auto max-w-3xl p-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Error</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p>Post ID is missing. Cannot display post details.</p>
-          </CardContent>
-        </Card>
+      <div className="max-w-[1000px] mx-auto p-4">
+        <div className="bg-white rounded-[12px] p-4 shadow-sm">
+          <h2 className="text-[17px] font-medium">Error</h2>
+          <p className="text-gray-500 mt-2 text-[15px]">Content not found</p>
+        </div>
       </div>
     )
   }
 
   if (isLoadingPost && !post) {
     return (
-      <div className="container mx-auto max-w-3xl p-4">
-        <Card>
-          <CardHeader>
-            <div className="flex items-center space-x-3">
-              <Skeleton className="h-10 w-10 rounded-full" />
-              <div className="space-y-1">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-3 w-24" />
+      <div className="max-w-[1000px] mx-auto p-4">
+        <div className="flex bg-white rounded-[12px] shadow-sm overflow-hidden">
+          <Skeleton className="min-w-[350px] h-auto aspect-square" />
+          <div className="p-4 flex-1">
+            <div className="flex items-center">
+              <Skeleton className="h-8 w-8 rounded-full" />
+              <div className="ml-3 flex-1">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-3 w-16 mt-1" />
               </div>
+              <Skeleton className="h-8 w-20 rounded-full" />
             </div>
-            <Skeleton className="h-6 w-3/4 mt-2" />
-          </CardHeader>
-          <CardContent>
-            <Skeleton className="h-64 w-full" />
-            <Skeleton className="h-4 w-full mt-4" />
-            <Skeleton className="h-4 w-3/4 mt-2" />
-            <div className="flex items-center justify-between mt-4">
-              <Skeleton className="h-8 w-20" />
-              <Skeleton className="h-8 w-20" />
-              <Skeleton className="h-8 w-20" />
-            </div>
-          </CardContent>
-        </Card>
+            <Skeleton className="mt-4 h-6 w-full" />
+            <Skeleton className="mt-2 h-6 w-2/3" />
+          </div>
+        </div>
       </div>
     )
   }
 
   if (isErrorPost || !post) {
-    // Check !post again in case error occurred but post data is stale
     return (
-      <div className="container mx-auto max-w-3xl p-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Error Loading Post</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p>
-              {postError?.message ||
-                'An unexpected error occurred while fetching the post.'}
-            </p>
-            <Button onClick={() => router.push('/')} className="mt-4">
-              Go Home
-            </Button>
-          </CardContent>
-        </Card>
+      <div className="max-w-[1000px] mx-auto p-4">
+        <div className="bg-white rounded-[12px] p-4 shadow-sm">
+          <h2 className="text-[17px] font-medium mb-2">Error Loading Post</h2>
+          <p className="text-gray-500 mb-4 text-[15px]">
+            {postError?.message || 'An unexpected error occurred'}
+          </p>
+          <Button
+            onClick={() => router.push('/')}
+            className="rounded-full text-[14px]"
+            size="sm"
+          >
+            Go Home
+          </Button>
+        </div>
       </div>
     )
   }
 
-  // Prepare image data for Lightbox
-  const lightboxImage: MessageImage | null = post.coverImg
-    ? {
-        id: Number(post.id), // Use post ID as a pseudo image ID for this context
-        url: post.coverImg,
-        // r2Key is not available here
-      }
-    : null
-
   return (
-    <Card className="container mx-auto max-w-3xl my-6 shadow-lg dark:border-gray-700">
-      <CardHeader>
-        <div className="flex items-center space-x-3 mb-3">
-          <Avatar className="h-10 w-10">
-            <AvatarImage
-              src={post.author?.image ?? undefined}
-              alt={post.author?.name ?? 'Author'}
-            />
-            <AvatarFallback>{getInitials(post.author?.name)}</AvatarFallback>
-          </Avatar>
-          <div>
-            <CardTitle className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {post.author?.name || 'Anonymous User'}
-            </CardTitle>
-            <CardDescription className="text-xs text-gray-500 dark:text-gray-400">
-              Posted{' '}
-              {post.createdAt
-                ? formatDistanceToNowStrict(new Date(post.createdAt), {
-                    addSuffix: true,
-                  })
-                : 'some time ago'}
-            </CardDescription>
-          </div>
-          <div className="ml-auto">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-            >
-              <MoreHorizontal className="h-5 w-5" />
-            </Button>
-          </div>
-        </div>
-        {post.parentPost && (
-          <div className="mb-2 text-sm text-muted-foreground">
-            <Repeat size={14} className="inline-block mr-1 -mt-0.5" />
-            Inspired by:{' '}
-            <Link
-              href={`/posts/${post.parentPost.id}`}
-              className="hover:underline text-primary"
-            >
-              &ldquo;{post.parentPost.title || 'a previous vibe'}&rdquo;
-            </Link>
-            {post.parentPost.author && (
+    <div className="max-w-5xl mx-auto">
+      {/* Main post container */}
+      <div className="bg-white rounded-[32px] shadow-sm overflow-hidden">
+        <div className="flex flex-col md:flex-row h-[80vh]">
+          {/* Image section */}
+          <div className="md:w-[60%] h-full relative overflow-hidden rounded-l-[32px] bg-[#f5f5f7]">
+            {/* Heavily blurred background image */}
+            {currentImageUrl && (
+              <div
+                className="absolute inset-0 z-0 bg-cover bg-center opacity-50 scale-125"
+                style={{
+                  backgroundImage: `url(${currentImageUrl})`,
+                  filter: 'blur(80px) saturate(120%)',
+                }}
+              />
+            )}
+
+            {/* Main image container with centered content */}
+            <div className="relative z-10 w-full h-full flex items-center justify-center p-8">
+              {currentImageUrl && (
+                <img
+                  src={currentImageUrl}
+                  alt={post?.title || 'Post image'}
+                  className="max-w-full max-h-full object-contain rounded-xl shadow-[0_4px_30px_rgba(0,0,0,0.1)]"
+                />
+              )}
+            </div>
+
+            {/* Image navigation */}
+            {totalImages > 1 && (
               <>
-                {' by '}
-                <Link
-                  href={`/u/${post.parentPost.author.username}`}
-                  className="hover:underline text-primary"
-                >
-                  @
-                  {post.parentPost.author.username ||
-                    post.parentPost.author.name ||
-                    'another user'}
-                </Link>
+                {/* Image counter - top right with improved styling */}
+                <div className="absolute top-6 right-6 z-20 px-3 py-1 rounded-full bg-black/25 backdrop-blur-sm text-white text-sm shadow-sm">
+                  {currentImageIndex + 1}/{totalImages}
+                </div>
+
+                {/* Navigation arrows - more subtle styling */}
+                <div className="absolute inset-0 z-20 opacity-0 hover:opacity-100 transition-opacity duration-200">
+                  <div className="absolute inset-0 flex items-center justify-between px-8">
+                    <button
+                      type="button"
+                      className="w-10 h-10 rounded-full bg-black/25 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/40 transition-colors focus:outline-none shadow-lg"
+                      onClick={handlePrevImage}
+                      aria-label="Previous image"
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      className="w-10 h-10 rounded-full bg-black/25 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/40 transition-colors focus:outline-none shadow-lg"
+                      onClick={handleNextImage}
+                      aria-label="Next image"
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bottom dots - more subtle styling */}
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-black/25 backdrop-blur-sm">
+                  {post?.imagesForClient?.map((img, i) => (
+                    <button
+                      key={`image-dot-${img.id || i}`}
+                      type="button"
+                      className={`h-1.5 rounded-full transition-all ${
+                        i === currentImageIndex
+                          ? 'w-4 bg-white'
+                          : 'w-1.5 bg-white/60 hover:bg-white/80'
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDotClick(i)
+                      }}
+                      aria-label={`View image ${i + 1}`}
+                    />
+                  ))}
+                </div>
               </>
             )}
           </div>
-        )}
-        {post.title && (
-          <h2 className="text-xl font-semibold mb-2">{post.title}</h2>
-        )}
-        {post.tags && post.tags.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {post.tags.map((tag: string) => (
-              <Badge
-                key={tag}
-                variant="secondary"
-                className="text-xs dark:bg-gray-700 dark:text-gray-300"
-              >
-                {tag}
-              </Badge>
-            ))}
-          </div>
-        )}
-      </CardHeader>
 
-      <CardContent className="pb-4 pt-0">
-        {post.coverImg && (
-          <button
-            type="button"
-            className="relative block aspect-video w-full mb-6 bg-muted rounded-lg overflow-hidden cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background p-0 border-0"
-            onClick={() => setLightboxOpen(true)}
-            aria-label={`View image: ${post.title || 'Untitled Vibe'}`}
+          {/* Content section */}
+          <div
+            className="flex flex-col flex-1 h-full md:w-[40%] bg-white"
+            style={{ borderRadius: '0 32px 32px 0' }}
           >
-            <Image
-              src={post.coverImg}
-              alt={post.title || 'Post image'}
-              fill
-              className="object-contain"
-              priority
-            />
-          </button>
-        )}
-        <div className="prose dark:prose-invert max-w-none mb-6">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {post.description || 'No description available.'}
-          </ReactMarkdown>
-        </div>
+            {/* Scrollable content area */}
+            <div className="flex flex-col flex-1 overflow-y-auto">
+              {/* Author info */}
+              <div className="p-5 border-b border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center flex-1">
+                    <Avatar className="h-9 w-9 rounded-full">
+                      <AvatarImage
+                        src={post.author?.image ?? undefined}
+                        alt={post.author?.name ?? 'Author'}
+                      />
+                      <AvatarFallback>
+                        {getInitials(post.author?.name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="ml-2.5 flex-1 min-w-0">
+                      <div className="font-medium text-[15px] truncate">
+                        {post.author?.name || 'Anonymous'}
+                      </div>
+                    </div>
+                  </div>
+                  <Button variant="default" size="sm" className="rounded-full">
+                    Follow
+                  </Button>
+                </div>
 
-        <div className="mt-3 text-xs text-gray-500 dark:text-gray-400 flex items-center">
-          <Eye className="h-4 w-4 mr-1.5" />
-          {post.viewCount ?? 0} views
-        </div>
-      </CardContent>
+                {/* Post content */}
+                <div className="mt-4">
+                  {post.title && (
+                    <h1 className="text-xl font-semibold mb-3">{post.title}</h1>
+                  )}
 
-      <Separator className="my-0 dark:bg-gray-700" />
+                  {post.bodyMd && post.bodyMd.trim() !== '' ? (
+                    <div className="text-[15px] leading-relaxed text-gray-800 whitespace-pre-line mb-4">
+                      {post.bodyMd}
+                    </div>
+                  ) : null}
 
-      <CardFooter className="py-3 px-4 sm:px-6 flex items-center justify-start space-x-1 sm:space-x-2 bg-gray-50 dark:bg-gray-800/30">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-          onClick={() => likeMutation.mutate()}
-          disabled={likeMutation.isPending}
-        >
-          {likeMutation.isPending ? (
-            <Loader2 className="h-5 w-5 animate-spin" />
-          ) : post.isLiked ? (
-            <Heart className="h-5 w-5 text-red-500 fill-red-500" />
-          ) : (
-            <Heart className="h-5 w-5" />
-          )}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-          onClick={() => commentInputRef.current?.focus()}
-        >
-          <MessageSquare className="h-5 w-5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-          onClick={handleRemixClick}
-        >
-          <Repeat className="h-5 w-5" />
-        </Button>
-        <div className="flex-grow" />
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-            onClick={() => toggleBookmarkMutation.mutate()}
-            disabled={toggleBookmarkMutation.isPending}
-            title={post.isBookmarked ? 'Remove Bookmark' : 'Bookmark Post'}
-          >
-            {toggleBookmarkMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : post.isBookmarked ? (
-              <Bookmark className="h-4 w-4 fill-primary text-primary" />
-            ) : (
-              <Bookmark className="h-4 w-4" />
-            )}
-          </Button>
-          <span className="text-xs text-muted-foreground ml-1">
-            {post.bookmarkCount ?? 0}
-          </span>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-          onClick={handleShareClick}
-        >
-          <Share2 className="h-5 w-5" />
-        </Button>
-      </CardFooter>
+                  {post.tags && post.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {post.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="text-[14px] text-blue-600 cursor-pointer hover:text-blue-700"
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
-      <Separator className="my-0 dark:bg-gray-700" />
+                  <div className="text-[13px] text-gray-500 mt-3">
+                    {post.createdAt &&
+                      formatDistanceToNowStrict(new Date(post.createdAt), {
+                        addSuffix: true,
+                      })}
+                  </div>
+                </div>
+              </div>
 
-      {/* Remix Tree Display */}
-      {postIdString && (
-        <RemixTreeDisplay postId={postIdString} getRemixTreeFn={getRemixTree} />
-      )}
-
-      <Separator className="my-0 dark:bg-gray-700" />
-
-      {/* Comments Section */}
-      <div className="px-4 py-6 sm:px-6">
-        <h2 className="text-xl font-semibold mb-2 text-gray-900 dark:text-gray-100">
-          Comments ({post.commentCount ?? comments?.length ?? 0})
-        </h2>
-
-        {currentUser && post && post.id && (
-          <CommentInput
-            onSubmit={handleCommentSubmit}
-            currentUser={currentUser}
-            isLoading={createCommentMutation.isPending}
-            replyTarget={replyTarget}
-            onCancelReply={cancelReply}
-            ref={commentInputRef}
-          />
-        )}
-        {!currentUser && (
-          <p className="text-sm text-gray-500 dark:text-gray-400 py-3">
-            Please log in to post a comment.
-          </p>
-        )}
-        {currentUser && (!post || !post.id) && isLoadingPost && (
-          <Skeleton className="h-28 w-full mt-4 rounded-lg" />
-        )}
-
-        {isLoadingComments && (
-          <div className="space-y-4 mt-4">
-            <Skeleton className="h-20 w-full rounded-lg" />
-            <Skeleton className="h-20 w-full rounded-lg" />
-            <Skeleton className="h-20 w-full rounded-lg" />
-          </div>
-        )}
-        {commentsError && (
-          <p className="text-red-500 mt-4 py-3">
-            Failed to load comments: {commentsError.message}
-          </p>
-        )}
-        {!isLoadingComments &&
-          !commentsError &&
-          comments &&
-          comments.length > 0 && (
-            <div className="mt-4 space-y-0 divide-y divide-gray-200 dark:divide-gray-700 border-t border-gray-200 dark:border-gray-700">
-              {topLevelComments.map((comment) => (
-                <CommentItem
-                  key={comment.id}
-                  comment={comment}
-                  allCommentsById={commentsById}
-                  nestingLevel={0}
-                  currentUserId={currentUser?.id}
-                  onReply={handleReplyClick}
-                />
-              ))}
+              {/* Empty comment state */}
+              <div className="flex-1 flex flex-col items-center justify-center p-5">
+                <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-3">
+                  <span className="text-3xl text-gray-300">:)</span>
+                </div>
+                <p className="text-gray-400 text-[14px]">Nothing here yet</p>
+                <button
+                  type="button"
+                  className="mt-2 text-[14px] text-gray-500 hover:text-gray-600"
+                >
+                  Add a comment
+                </button>
+              </div>
             </div>
-          )}
-        {!isLoadingComments &&
-          !commentsError &&
-          (!comments || comments.length === 0) && (
-            <p className="text-gray-500 dark:text-gray-400 mt-4 py-3">
-              No comments yet. Be the first to comment!
-            </p>
-          )}
+
+            {/* Fixed bottom bar */}
+            <div className="border-t border-gray-100 bg-white">
+              <div className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-6">
+                    <button
+                      type="button"
+                      className="flex items-center gap-1.5 text-gray-700"
+                      onClick={() => likeMutation.mutate()}
+                    >
+                      {post.isLiked ? (
+                        <Heart className="h-[22px] w-[22px] fill-red-500 text-red-500" />
+                      ) : (
+                        <Heart className="h-[22px] w-[22px]" />
+                      )}
+                      <span className="text-[15px]">{post.likeCount || 0}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="flex items-center gap-1.5 text-gray-700"
+                    >
+                      <MessageSquare className="h-[22px] w-[22px]" />
+                      <span className="text-[15px]">
+                        {post.commentCount || 0}
+                      </span>
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-5">
+                    <button
+                      type="button"
+                      className="text-gray-700"
+                      onClick={() => toggleBookmarkMutation.mutate()}
+                    >
+                      {post.isBookmarked ? (
+                        <Bookmark className="h-[22px] w-[22px] fill-gray-700" />
+                      ) : (
+                        <Bookmark className="h-[22px] w-[22px]" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-gray-700"
+                      onClick={handleShareClick}
+                    >
+                      <Share2 className="h-[22px] w-[22px]" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Comment input */}
+                <input
+                  type="text"
+                  placeholder="Write a comment..."
+                  className="w-full px-4 py-2 text-[14px] bg-gray-50 border-none rounded-full outline-none focus:ring-1 focus:ring-gray-200 focus:bg-gray-100 transition-all"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-    </Card>
+    </div>
   )
 }

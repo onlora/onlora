@@ -27,7 +27,7 @@ const FeedPostCard: React.FC<FeedPostCardProps> = ({ post }) => {
         {post.coverImg ? (
           <Link
             href={`/posts/${post.id}`}
-            className="block relative overflow-hidden"
+            className="block relative overflow-hidden aspect-[3/4]"
           >
             <Image
               src={post.coverImg}

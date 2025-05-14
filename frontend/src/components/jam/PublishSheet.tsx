@@ -3,15 +3,16 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import type { MessageImage } from '@/lib/api/jamApi'
+import type { MessageImage } from '@/types/images'
 import { Tag, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 export type PostVisibility = 'public' | 'private'
 
 export interface PublishData {
-  title: string // Keep title field for API compatibility
+  title: string
   description: string
   tags: string[]
 }
@@ -36,6 +37,7 @@ export function PublishSheet({
   initialTags = [],
 }: PublishSheetProps) {
   // Remove debug logs
+  const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState('')
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState<string[]>(initialTags)
@@ -43,11 +45,12 @@ export function PublishSheet({
   useEffect(() => {
     if (isOpen) {
       // Reset form when dialog opens
+      setTitle(initialTitle || '')
       setDescription('')
       setTagInput('')
       setTags(initialTags || [])
     }
-  }, [isOpen, initialTags])
+  }, [isOpen, initialTitle, initialTags])
 
   const handleTagAdd = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (
@@ -80,15 +83,15 @@ export function PublishSheet({
     // Combine and deduplicate tags
     const allTags = [...new Set([...tagsFromDescription, ...tags])]
 
-    // Generate a default title if none provided
-    const defaultTitle =
-      initialTitle ||
+    // Use provided title or generate a default one
+    const finalTitle =
+      title ||
       (description && description.length > 30
         ? `${description.substring(0, 30)}...`
         : description || 'My Vibe')
 
     const publishData = {
-      title: defaultTitle, // Use description beginning or default
+      title: finalTitle,
       description,
       tags: allTags,
     }
@@ -105,6 +108,14 @@ export function PublishSheet({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[650px] p-0 overflow-hidden rounded-xl">
         <div className="flex flex-col p-4">
+          {/* Title Input */}
+          <Input
+            placeholder="Add a title to your vibe"
+            className="w-full border-none text-lg placeholder:text-gray-400 focus-visible:ring-0 p-0 h-auto mb-3 font-medium"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+
           {/* Text Input Area */}
           <Textarea
             placeholder="What's your vibe?"
