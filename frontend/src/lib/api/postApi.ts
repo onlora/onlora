@@ -43,6 +43,7 @@ export interface PostAuthor {
   name: string | null
   image: string | null // Avatar URL
   username?: string // Added optional username for authors
+  isFollowing?: boolean // Added optional field to indicate if the current user is following this author
 }
 
 export interface PostImage {

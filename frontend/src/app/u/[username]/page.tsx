@@ -82,7 +82,6 @@ export default function UserProfilePage({ params }: UserProfilePageProps) {
   const followMutation = useMutation({
     mutationFn: () => followUser(user?.id ?? ''),
     onSuccess: () => {
-      toast.success(`Followed @${username}`)
       queryClient.invalidateQueries({ queryKey: queryKey })
     },
     onError: (err) => {
@@ -93,7 +92,6 @@ export default function UserProfilePage({ params }: UserProfilePageProps) {
   const unfollowMutation = useMutation({
     mutationFn: () => unfollowUser(user?.id ?? ''),
     onSuccess: () => {
-      toast.success(`Unfollowed @${username}`)
       queryClient.invalidateQueries({ queryKey: queryKey })
     },
     onError: (err) => {

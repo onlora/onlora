@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { db } from '../db' // Adjust path as needed
 import {
   bookmarks,
+  follows,
   images,
   likes,
   postImages,
@@ -173,6 +174,7 @@ interface PostQueryResult {
     username: string
     name: string | null
     image: string | null
+    isFollowing?: boolean
   } | null
   postImages: Array<{
     id: string // id of the post_images record
@@ -571,6 +573,23 @@ postRoutes.get(
           columns: { userId: true },
         })
         isBookmarked = !!bookmarkRecord
+
+        // Check if current user is following the post author
+        if (postData.author && postData.author.id !== currentUser.id) {
+          const followRecord = await db.query.follows.findFirst({
+            where: and(
+              eq(follows.followerId, currentUser.id),
+              eq(follows.followingId, postData.author.id),
+            ),
+            columns: { followerId: true },
+          })
+
+          // Add isFollowing to the author object
+          postData.author = {
+            ...postData.author,
+            isFollowing: !!followRecord,
+          }
+        }
       }
 
       // Transform postImages to a cleaner array of image objects for the client

@@ -30,6 +30,7 @@ import {
   toggleLikePost,
   unbookmarkPost,
 } from '@/lib/api/postApi'
+import { followUser, unfollowUser } from '@/lib/api/userApi'
 
 // Extend the PostDetails type to include expected fields from the API response
 interface PostDetails extends BasePostDetails {
@@ -490,6 +491,79 @@ export default function PostDetailPage() {
     return post?.imagesForClient?.length || 0
   }, [post])
 
+  // Add follow mutation
+  const followMutation = useMutation({
+    mutationFn: () => {
+      if (!post?.author?.id) {
+        throw new Error('Author ID is missing')
+      }
+      if (post.author.isFollowing) {
+        return unfollowUser(post.author.id)
+      }
+      return followUser(post.author.id)
+    },
+    onMutate: async () => {
+      if (!post?.author) return
+
+      // Optimistically update the UI
+      queryClient.setQueryData<PostDetails>(
+        ['post', postIdString],
+        (oldPost) => {
+          if (!oldPost || !oldPost.author) return oldPost
+
+          return {
+            ...oldPost,
+            author: {
+              ...oldPost.author,
+              isFollowing: !oldPost.author.isFollowing,
+            },
+          }
+        },
+      )
+
+      return {
+        previousIsFollowing: post.author.isFollowing,
+      }
+    },
+    onError: (error, _, context) => {
+      // Revert on error
+      if (context && post?.author && postIdString) {
+        queryClient.setQueryData<PostDetails>(
+          ['post', postIdString],
+          (oldPost) => {
+            if (!oldPost || !oldPost.author) return oldPost
+
+            return {
+              ...oldPost,
+              author: {
+                ...oldPost.author,
+                isFollowing: context.previousIsFollowing,
+              },
+            }
+          },
+        )
+      }
+      console.error('Follow/unfollow error:', error)
+      toast.error('Failed to update follow status')
+    },
+    onSuccess: (data) => {
+      // Revalidate the post data to get the updated follow status
+      if (postIdString) {
+        queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
+      }
+    },
+  })
+
+  // Add a handleFollowClick function
+  const handleFollowClick = useCallback(() => {
+    if (!currentUser) {
+      toast.error('Please sign in to follow users')
+      return
+    }
+
+    followMutation.mutate()
+  }, [currentUser, followMutation])
+
   // Error states
   if (!postIdString) {
     return (
@@ -650,8 +724,18 @@ export default function PostDetailPage() {
                     </div>
                   </div>
                 </div>
-                <Button variant="default" size="sm" className="rounded-full">
-                  Follow
+                <Button
+                  variant={post.author?.isFollowing ? 'outline' : 'default'}
+                  size="sm"
+                  className="rounded-full"
+                  onClick={handleFollowClick}
+                  disabled={followMutation.isPending || !currentUser}
+                >
+                  {followMutation.isPending
+                    ? 'Loading...'
+                    : post.author?.isFollowing
+                      ? 'Following'
+                      : 'Follow'}
                 </Button>
               </div>
             </div>
