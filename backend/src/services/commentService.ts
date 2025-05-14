@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import { db } from '../db'
-import { comments, notifications, posts } from '../db/schema'
+import { commentLikes, comments, notifications, posts } from '../db/schema'
 
 // UUID validation pattern
 const uuidPattern =
@@ -76,6 +76,14 @@ export async function createComment(
       .set({ commentCount: sql`${posts.commentCount} + 1` })
       .where(eq(posts.id, payload.postId))
 
+    // 4a. If this is a reply, also increment the parent comment's comment count
+    if (payload.parentId) {
+      await tx
+        .update(comments)
+        .set({ commentCount: sql`${comments.commentCount} + 1` })
+        .where(eq(comments.id, payload.parentId))
+    }
+
     // 5. Insert Notifications
     let parentCommentAuthorId: string | null | undefined = null
 
@@ -133,9 +141,14 @@ export async function createComment(
 /**
  * Gets comments for a post
  * @param postId The ID of the post
+ * @param currentUserId Optional ID of the current user to check for likes
  * @returns An array of comments with their authors
  */
-export async function getCommentsByPostId(postId: string) {
+export async function getCommentsByPostId(
+  postId: string,
+  currentUserId?: string,
+) {
+  // First get all comment IDs for this post
   const commentsData = await db.query.comments.findMany({
     where: eq(comments.postId, postId),
     with: {
@@ -146,10 +159,31 @@ export async function getCommentsByPostId(postId: string) {
     orderBy: [sql`${comments.createdAt} asc`],
   })
 
-  // Map to desired response structure (rename user to author)
-  return commentsData.map((comment) => ({
-    ...comment,
-    author: comment.user,
-    user: undefined, // Remove the original user field
-  }))
+  // If we have a currentUserId, get likes in a separate query for simplicity
+  let userLikedCommentIds: Set<string> = new Set()
+  if (currentUserId) {
+    try {
+      // Simple direct query
+      const likes = await db
+        .select({ commentId: commentLikes.commentId })
+        .from(commentLikes)
+        .where(eq(commentLikes.userId, currentUserId))
+
+      userLikedCommentIds = new Set(likes.map((like) => like.commentId))
+    } catch (error) {
+      console.error('Error querying comment likes:', error)
+    }
+  }
+
+  // Map to desired response structure (rename user to author and add isLiked)
+  return commentsData.map((comment) => {
+    const isLiked = userLikedCommentIds.has(comment.id)
+
+    return {
+      ...comment,
+      author: comment.user,
+      isLiked,
+      user: undefined, // Remove the original user field
+    }
+  })
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto' // For generating UUIDs
 import { zValidator } from '@hono/zod-validator'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
@@ -15,14 +15,17 @@ import {
   veTxns,
   visibilityEnum,
 } from '../db/schema' // Adjust path as needed
-import { comments as commentsSchema } from '../db/schema' // Import schema explicitly for typing
 import { uploadBufferToR2 } from '../lib/r2' // Import R2 upload function
 import {
   type AuthenticatedContextEnv,
   optionalAuthMiddleware,
   requireAuthMiddleware,
 } from '../middleware/auth' // Changed to AuthenticatedContextEnv
-import { createComment, createCommentSchema } from '../services/commentService' // Import from service
+import {
+  createComment,
+  createCommentSchema,
+  getCommentsByPostId,
+} from '../services/commentService' // Import from service
 
 // UUID validation pattern
 const uuidPattern =
@@ -664,6 +667,7 @@ postRoutes.post(
 // GET /api/posts/:postId/comments - Fetch comments for a post
 postRoutes.get(
   '/:postId/comments',
+  optionalAuthMiddleware, // Make this optional auth so we can get the user ID if present
   zValidator('param', postIdParamSchema, (result, c) => {
     if (!result.success) {
       throw new HTTPException(400, {
@@ -688,29 +692,14 @@ postRoutes.get(
     }
 
     try {
-      // Fetch comments and assert the type for clearer access to relations
-      const fetchedComments = (await db.query.comments.findMany({
-        where: eq(commentsSchema.postId, postId), // Use explicit schema import
-        with: {
-          user: {
-            // Correct relation name
-            columns: { id: true, name: true, image: true, username: true },
-          },
-        },
-        orderBy: [asc(commentsSchema.createdAt)], // Use explicit schema import
-      })) as CommentWithUser[] // Assert the result type
+      // Get current user ID if authenticated
+      const currentUser = c.get('user')
+      const currentUserId = currentUser?.id
 
-      // Map to desired response structure (rename user to author)
-      const commentsWithAuthor = fetchedComments.map((comment) => ({
-        ...comment, // Spread basic comment fields
-        author: comment.user, // Assign the nested user object to author
-        user: undefined, // Remove the original user field from the final response
-      }))
+      // Use the service function and pass currentUserId
+      const comments = await getCommentsByPostId(postId, currentUserId)
 
-      // Remove the user field after mapping if it's not desired in the final output
-      const finalResponse = commentsWithAuthor.map(({ user, ...rest }) => rest)
-
-      return c.json(finalResponse, 200)
+      return c.json(comments, 200)
     } catch (error) {
       console.error(`Error fetching comments for post ${postId}:`, error)
       throw new HTTPException(500, { message: 'Failed to fetch comments' })

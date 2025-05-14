@@ -153,6 +153,8 @@ export const comments = pgTable('comments', {
   }),
   parentId: uuid('parent_id'),
   body: text('body').notNull(),
+  likeCount: integer('like_count').default(0).notNull(),
+  commentCount: integer('comment_count').default(0).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 })
 
@@ -359,6 +361,36 @@ export const bookmarksRelations = relations(bookmarks, ({ one }) => ({
   }),
   user: one(users, {
     fields: [bookmarks.userId],
+    references: [users.id],
+  }),
+}))
+
+// --- Comment Likes Table ---
+export const commentLikes = pgTable(
+  'comment_likes',
+  {
+    commentId: uuid('comment_id')
+      .notNull()
+      .references(() => comments.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  },
+  (table) => {
+    return {
+      pk: primaryKey({ columns: [table.commentId, table.userId] }),
+    }
+  },
+)
+
+export const commentLikesRelations = relations(commentLikes, ({ one }) => ({
+  comment: one(comments, {
+    fields: [commentLikes.commentId],
+    references: [comments.id],
+  }),
+  user: one(users, {
+    fields: [commentLikes.userId],
     references: [users.id],
   }),
 }))

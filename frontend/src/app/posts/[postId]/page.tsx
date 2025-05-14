@@ -128,7 +128,13 @@ export default function PostDetailPage() {
     }
 
     for (const comment of comments) {
-      commentsByIdMap[comment.id] = { ...comment }
+      // Make sure isLiked is included for each comment
+      commentsByIdMap[comment.id] = {
+        ...comment,
+        isLiked: comment.isLiked ?? false,
+        likeCount: comment.likeCount ?? 0,
+        commentCount: comment.commentCount ?? 0,
+      }
     }
 
     for (const comment of comments) {
@@ -188,7 +194,6 @@ export default function PostDetailPage() {
       if (postIdString) {
         queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
       }
-      toast.success(data.liked ? 'Post liked' : 'Post unliked')
     },
     onError: (err, _newLikeState, context) => {
       if (context?.previousPost && postIdString) {
@@ -250,7 +255,6 @@ export default function PostDetailPage() {
       if (postIdString) {
         queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
       }
-      toast.success(data.bookmarked ? 'Post bookmarked' : 'Post unbookmarked')
     },
     onError: (err, _variables, context) => {
       if (context?.previousPost && postIdString) {
@@ -307,6 +311,9 @@ export default function PostDetailPage() {
           image: currentUser.image,
           username: currentUser.username,
         },
+        likeCount: 0,
+        commentCount: 0,
+        isLiked: false,
       }
 
       queryClient.setQueryData<CommentWithAuthor[]>(
@@ -362,7 +369,6 @@ export default function PostDetailPage() {
       if (postIdString) {
         queryClient.invalidateQueries({ queryKey: ['post', postIdString] })
       }
-      toast.success('Comment posted!')
     },
     onSettled: () => {
       if (postIdString) {
@@ -379,7 +385,6 @@ export default function PostDetailPage() {
         return
       }
       if (!body.trim()) {
-        toast.error('Comment cannot be empty')
         return
       }
 
@@ -406,7 +411,7 @@ export default function PostDetailPage() {
     navigator.clipboard
       .writeText(url)
       .then(() => {
-        toast.success('Link copied')
+        toast.success('Link copied to clipboard!')
       })
       .catch((err) => {
         console.error('Failed to copy link: ', err)
@@ -417,7 +422,7 @@ export default function PostDetailPage() {
   const handleReplyClick = useCallback(
     (commentId: string, authorName: string) => {
       if (!currentUser) {
-        toast.error('Please log in to reply')
+        // Remove toast - rely on UI to handle this case (Sign in button is shown)
         return
       }
       setReplyTarget({ id: commentId, authorName })
@@ -626,70 +631,70 @@ export default function PostDetailPage() {
             className="flex flex-col flex-1 h-full md:w-[40%] bg-white"
             style={{ borderRadius: '0 32px 32px 0' }}
           >
-            {/* Scrollable content area */}
-            <div className="flex flex-col flex-1 overflow-y-auto">
-              {/* Author info */}
-              <div className="p-5 border-b border-gray-100">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center flex-1">
-                    <Avatar className="h-9 w-9 rounded-full">
-                      <AvatarImage
-                        src={post.author?.image ?? undefined}
-                        alt={post.author?.name ?? 'Author'}
-                      />
-                      <AvatarFallback>
-                        {getInitials(post.author?.name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="ml-2.5 flex-1 min-w-0">
-                      <div className="font-medium text-[15px] truncate">
-                        {post.author?.name || 'Anonymous'}
-                      </div>
+            {/* Author info section - fixed */}
+            <div className="p-5 border-b border-gray-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center flex-1">
+                  <Avatar className="h-9 w-9 rounded-full">
+                    <AvatarImage
+                      src={post.author?.image ?? undefined}
+                      alt={post.author?.name ?? 'Author'}
+                    />
+                    <AvatarFallback>
+                      {getInitials(post.author?.name)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="ml-2.5 flex-1 min-w-0">
+                    <div className="font-medium text-[15px] truncate">
+                      {post.author?.name || 'Anonymous'}
                     </div>
                   </div>
-                  <Button variant="default" size="sm" className="rounded-full">
-                    Follow
-                  </Button>
                 </div>
+                <Button variant="default" size="sm" className="rounded-full">
+                  Follow
+                </Button>
+              </div>
+            </div>
 
-                {/* Post content */}
-                <div className="mt-4">
-                  {post.title && (
-                    <h1 className="text-xl font-semibold mb-3">{post.title}</h1>
-                  )}
+            {/* Scrollable content area - both post content and comments */}
+            <div className="flex-1 overflow-y-auto">
+              {/* Post content */}
+              <div className="px-5 pt-4 pb-5 border-b border-gray-100">
+                {post.title && (
+                  <h1 className="text-xl font-semibold mb-3">{post.title}</h1>
+                )}
 
-                  {post.bodyMd && post.bodyMd.trim() !== '' ? (
-                    <div className="text-[15px] leading-relaxed text-gray-800 whitespace-pre-line mb-4">
-                      {post.bodyMd}
-                    </div>
-                  ) : null}
-
-                  {post.tags && post.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-2 mt-3">
-                      {post.tags.map((tag) => (
-                        <span
-                          key={tag}
-                          className="text-[14px] text-muted-foreground cursor-pointer hover:text-primary font-medium"
-                        >
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="text-[13px] text-gray-500 mt-3">
-                    {post.createdAt &&
-                      formatDistanceToNowStrict(new Date(post.createdAt), {
-                        addSuffix: true,
-                      })}
+                {post.bodyMd && post.bodyMd.trim() !== '' ? (
+                  <div className="text-[15px] leading-relaxed text-gray-800 whitespace-pre-line mb-4">
+                    {post.bodyMd}
                   </div>
+                ) : null}
+
+                {post.tags && post.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {post.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="text-[14px] text-muted-foreground cursor-pointer hover:text-primary font-medium"
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="text-[13px] text-gray-500 mt-3">
+                  {post.createdAt &&
+                    formatDistanceToNowStrict(new Date(post.createdAt), {
+                      addSuffix: true,
+                    })}
                 </div>
               </div>
 
-              {/* Comment section */}
-              <div className="flex-1 p-5">
+              {/* Comments section - in the same scrollable area */}
+              <div className="p-5">
                 {comments && comments.length > 0 ? (
-                  <div className="space-y-3">
+                  <div className="space-y-1">
                     {topLevelComments.map((comment) => (
                       <CommentItem
                         key={comment.id}

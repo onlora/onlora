@@ -40,7 +40,7 @@ export default function RootLayout({
               <MainContent>{children}</MainContent>
             </main>
           </div>
-          <Toaster position="top-center" />
+          <Toaster position="top-right" />
         </Providers>
       </body>
     </html>
