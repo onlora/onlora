@@ -3,14 +3,7 @@
 import { useSession } from '@/lib/authClient'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNowStrict } from 'date-fns'
-import {
-  Bookmark,
-  ChevronLeft,
-  ChevronRight,
-  Heart,
-  MessageSquare,
-  Share2,
-} from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -18,6 +11,9 @@ import { toast } from 'sonner'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+
+import CommentInput from '@/components/comments/CommentInput'
+import CommentItem from '@/components/comments/CommentItem'
 
 import {
   type CommentWithAuthor,
@@ -80,7 +76,6 @@ export default function PostDetailPage() {
   }, [session])
 
   // Lightbox state
-  const [lightboxOpen, setLightboxOpen] = useState(false)
   const [replyTarget, setReplyTarget] = useState<CommentReplyTarget | null>(
     null,
   )
@@ -674,7 +669,7 @@ export default function PostDetailPage() {
                       {post.tags.map((tag) => (
                         <span
                           key={tag}
-                          className="text-[14px] text-blue-600 cursor-pointer hover:text-blue-700"
+                          className="text-[14px] text-muted-foreground cursor-pointer hover:text-primary font-medium"
                         >
                           #{tag}
                         </span>
@@ -691,76 +686,77 @@ export default function PostDetailPage() {
                 </div>
               </div>
 
-              {/* Empty comment state */}
-              <div className="flex-1 flex flex-col items-center justify-center p-5">
-                <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-3">
-                  <span className="text-3xl text-gray-300">:)</span>
-                </div>
-                <p className="text-gray-400 text-[14px]">Nothing here yet</p>
-                <button
-                  type="button"
-                  className="mt-2 text-[14px] text-gray-500 hover:text-gray-600"
-                >
-                  Add a comment
-                </button>
+              {/* Comment section */}
+              <div className="flex-1 p-5">
+                {comments && comments.length > 0 ? (
+                  <div className="space-y-3">
+                    {topLevelComments.map((comment) => (
+                      <CommentItem
+                        key={comment.id}
+                        comment={comment}
+                        allCommentsById={commentsById}
+                        nestingLevel={0}
+                        currentUserId={currentUser?.id}
+                        onReply={handleReplyClick}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-5">
+                    <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-3">
+                      <span className="text-3xl text-gray-300">:)</span>
+                    </div>
+                    <p className="text-gray-400 text-[14px]">No comments yet</p>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Fixed bottom bar */}
             <div className="border-t border-gray-100 bg-white">
               <div className="p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-6">
-                    <button
-                      type="button"
-                      className="flex items-center gap-1.5 text-gray-700"
-                      onClick={() => likeMutation.mutate()}
-                    >
-                      {post.isLiked ? (
-                        <Heart className="h-[22px] w-[22px] fill-red-500 text-red-500" />
-                      ) : (
-                        <Heart className="h-[22px] w-[22px]" />
-                      )}
-                      <span className="text-[15px]">{post.likeCount || 0}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="flex items-center gap-1.5 text-gray-700"
-                    >
-                      <MessageSquare className="h-[22px] w-[22px]" />
-                      <span className="text-[15px]">
-                        {post.commentCount || 0}
-                      </span>
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-5">
-                    <button
-                      type="button"
-                      className="text-gray-700"
-                      onClick={() => toggleBookmarkMutation.mutate()}
-                    >
-                      {post.isBookmarked ? (
-                        <Bookmark className="h-[22px] w-[22px] fill-gray-700" />
-                      ) : (
-                        <Bookmark className="h-[22px] w-[22px]" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className="text-gray-700"
-                      onClick={handleShareClick}
-                    >
-                      <Share2 className="h-[22px] w-[22px]" />
-                    </button>
-                  </div>
-                </div>
-
                 {/* Comment input */}
-                <input
-                  type="text"
-                  placeholder="Write a comment..."
-                  className="w-full px-4 py-2 text-[14px] bg-gray-50 border-none rounded-full outline-none focus:ring-1 focus:ring-gray-200 focus:bg-gray-100 transition-all"
-                />
+                {currentUser ? (
+                  <CommentInput
+                    ref={commentInputRef}
+                    onSubmit={handleCommentSubmit}
+                    currentUser={currentUser}
+                    isLoading={createCommentMutation.isPending}
+                    replyTarget={
+                      replyTarget
+                        ? {
+                            id: replyTarget.id,
+                            authorName: replyTarget.authorName,
+                          }
+                        : null
+                    }
+                    onCancelReply={cancelReply}
+                    likeCount={post.likeCount || 0}
+                    commentCount={post.commentCount || 0}
+                    onLike={() => likeMutation.mutate()}
+                    onShare={handleShareClick}
+                    isLiked={post.isLiked}
+                    onBookmark={() => toggleBookmarkMutation.mutate()}
+                    isBookmarked={post.isBookmarked}
+                  />
+                ) : (
+                  <div className="bg-gray-50 rounded-2xl px-5 py-4 text-center">
+                    <p className="text-gray-500 text-sm mb-2">
+                      Sign in to join the conversation
+                    </p>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="rounded-full px-4"
+                      onClick={() => {
+                        // Handle login
+                        router.push('/login')
+                      }}
+                    >
+                      Sign in
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
