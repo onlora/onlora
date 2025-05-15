@@ -74,8 +74,7 @@ const updateUserProfileSchema = z.object({
 const notificationIdParamSchema = z.object({
   notificationId: z
     .string()
-    .regex(/^\d+$/, 'Notification ID must be a positive integer.')
-    .transform(Number),
+    .uuid({ message: 'Notification ID must be a valid UUID.' }),
 })
 
 // Schema for visibility query parameter
@@ -85,7 +84,7 @@ const visibilityQuerySchema = z.object({
 
 // Define a type for the bookmarked post item, similar to FeedPost
 interface BookmarkedPostItem {
-  id: number
+  id: string
   title: string | null
   coverImg: string | null
   createdAt: string | null // ISO string
@@ -283,6 +282,189 @@ userRoutes.post(
         error,
       )
       throw new HTTPException(500, { message: 'Failed to unfollow user' })
+    }
+  },
+)
+
+// PATCH /api/users/me/profile - Update current authenticated user's profile
+userRoutes.patch(
+  '/me/profile',
+  requireAuthMiddleware,
+  zValidator('json', updateUserProfileSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid profile data format',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user || !user.id) {
+      // This should be caught by requireAuthMiddleware, but as a safeguard:
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+    const updatePayload = c.req.valid('json')
+
+    const updateData: Record<string, string | null> = {}
+    // Filter out undefined values, and allow null to be passed for clearing fields.
+    if (updatePayload.name !== undefined) updateData.name = updatePayload.name
+    if (updatePayload.bio !== undefined) updateData.bio = updatePayload.bio
+    if (updatePayload.image !== undefined)
+      updateData.image = updatePayload.image
+    if (updatePayload.bannerUrl !== undefined)
+      updateData.banner_url = updatePayload.bannerUrl // Uncommented and use banner_url for DB
+
+    if (Object.keys(updateData).length === 0) {
+      // Simplified condition as bannerUrl is now part of updateData if provided
+      // Return current profile if no actual data is sent for update, or a 304 Not Modified, or 400.
+      // For simplicity, let's return 400 as it implies client error.
+      throw new HTTPException(400, { message: 'No update data provided.' })
+    }
+
+    try {
+      const updatedUsers = await db
+        .update(users)
+        .set(updateData) // Drizzle should handle Partial correctly
+        .where(eq(users.id, user.id))
+        .returning({
+          id: users.id,
+          username: users.username,
+          name: users.name,
+          email: users.email,
+          image: users.image,
+          bio: users.bio,
+          bannerUrl: users.bannerUrl, // Uncommented and ensure it uses the schema name
+          vibeEnergy: users.vibe_energy,
+          followerCount: users.followerCount,
+          followingCount: users.followingCount,
+          createdAt: users.createdAt,
+        })
+
+      if (!updatedUsers || updatedUsers.length === 0) {
+        // This case should ideally not happen if the user is authenticated and exists.
+        throw new HTTPException(404, {
+          message: 'User not found, cannot update.',
+        })
+      }
+      // The user object from better-auth might not have all these fields.
+      // We return the updated profile from the DB.
+      return c.json(updatedUsers[0])
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error(`Error updating profile for user ${user.id}:`, error)
+      // Check for specific DB errors if needed, e.g., unique constraint violation on username if it were updatable here.
+      throw new HTTPException(500, { message: 'Failed to update user profile' })
+    }
+  },
+)
+
+// GET /api/users/me/profile - Fetch current authenticated user's profile AND their posts
+userRoutes.get(
+  '/me/profile',
+  requireAuthMiddleware,
+  zValidator('query', paginationQuerySchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid pagination parameters',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    console.log(
+      'Fetching current user profile and posts ',
+      c.req.valid('query'),
+    )
+
+    const user = c.get('user')
+    const { limit, offset } = c.req.valid('query')
+
+    if (!user || !user.id) {
+      throw new HTTPException(500, {
+        message: 'User context not found after auth.',
+      })
+    }
+
+    try {
+      // 1. Fetch user details
+      const userProfileFromDb = await db.query.users.findFirst({
+        where: eq(users.id, user.id),
+        columns: {
+          id: true,
+          username: true,
+          name: true,
+          email: true,
+          image: true,
+          bio: true,
+          bannerUrl: true, // Corrected: should be true to select the column
+          vibe_energy: true,
+          followerCount: true,
+          followingCount: true,
+          createdAt: true,
+        },
+      })
+
+      if (!userProfileFromDb) {
+        throw new HTTPException(404, {
+          message: 'Authenticated user profile not found.',
+        })
+      }
+
+      // Map to the UserProfile structure (frontend expects camelCase vibeEnergy)
+      const userForResponse = {
+        id: userProfileFromDb.id,
+        username: userProfileFromDb.username,
+        name: userProfileFromDb.name,
+        email: userProfileFromDb.email,
+        image: userProfileFromDb.image,
+        bio: userProfileFromDb.bio,
+        bannerUrl: userProfileFromDb.bannerUrl, // Add bannerUrl mapping
+        vibeEnergy: userProfileFromDb.vibe_energy, // Map to camelCase
+        followerCount: userProfileFromDb.followerCount,
+        followingCount: userProfileFromDb.followingCount,
+        createdAt: userProfileFromDb.createdAt,
+      }
+
+      // 2. Fetch user's posts (paginated)
+      const userPosts = await db.query.posts.findMany({
+        where: eq(posts.authorId, user.id), // No visibility filter for own posts, or filter as desired
+        columns: {
+          id: true,
+          title: true,
+          coverImg: true,
+          likeCount: true,
+          commentCount: true,
+          viewCount: true,
+          remixCount: true,
+          createdAt: true,
+          visibility: true, // Good to have for own posts view
+        },
+        orderBy: (postsTable, { desc }) => [desc(postsTable.createdAt)],
+        limit: limit,
+        offset: offset,
+      })
+
+      const hasNextPage = userPosts.length === limit
+
+      return c.json({
+        user: userForResponse, // Use the explicitly mapped user object
+        posts: {
+          items: userPosts,
+          pageInfo: {
+            hasNextPage,
+            nextOffset: hasNextPage ? offset + limit : null,
+          },
+        },
+      })
+    } catch (error) {
+      if (error instanceof HTTPException) {
+        throw error
+      }
+      console.error(`Error fetching profile data for user ${user.id}:`, error)
+      throw new HTTPException(500, {
+        message: 'Failed to fetch user profile data',
+      })
     }
   },
 )
@@ -532,184 +714,6 @@ userRoutes.get(
       throw new HTTPException(500, {
         message: 'Failed to fetch user profile by username',
         cause: errorMessage,
-      })
-    }
-  },
-)
-
-// PATCH /api/users/me/profile - Update current authenticated user's profile
-userRoutes.patch(
-  '/me/profile',
-  requireAuthMiddleware,
-  zValidator('json', updateUserProfileSchema, (result, c) => {
-    if (!result.success) {
-      throw new HTTPException(400, {
-        message: 'Invalid profile data format',
-        cause: result.error.flatten(),
-      })
-    }
-  }),
-  async (c) => {
-    const user = c.get('user')
-    if (!user || !user.id) {
-      // This should be caught by requireAuthMiddleware, but as a safeguard:
-      throw new HTTPException(401, { message: 'Authentication required' })
-    }
-    const updatePayload = c.req.valid('json')
-
-    const updateData: Record<string, string | null> = {}
-    // Filter out undefined values, and allow null to be passed for clearing fields.
-    if (updatePayload.name !== undefined) updateData.name = updatePayload.name
-    if (updatePayload.bio !== undefined) updateData.bio = updatePayload.bio
-    if (updatePayload.image !== undefined)
-      updateData.image = updatePayload.image
-    if (updatePayload.bannerUrl !== undefined)
-      updateData.banner_url = updatePayload.bannerUrl // Uncommented and use banner_url for DB
-
-    if (Object.keys(updateData).length === 0) {
-      // Simplified condition as bannerUrl is now part of updateData if provided
-      // Return current profile if no actual data is sent for update, or a 304 Not Modified, or 400.
-      // For simplicity, let's return 400 as it implies client error.
-      throw new HTTPException(400, { message: 'No update data provided.' })
-    }
-
-    try {
-      const updatedUsers = await db
-        .update(users)
-        .set(updateData) // Drizzle should handle Partial correctly
-        .where(eq(users.id, user.id))
-        .returning({
-          id: users.id,
-          username: users.username,
-          name: users.name,
-          email: users.email,
-          image: users.image,
-          bio: users.bio,
-          bannerUrl: users.bannerUrl, // Uncommented and ensure it uses the schema name
-          vibeEnergy: users.vibe_energy,
-          followerCount: users.followerCount,
-          followingCount: users.followingCount,
-          createdAt: users.createdAt,
-        })
-
-      if (!updatedUsers || updatedUsers.length === 0) {
-        // This case should ideally not happen if the user is authenticated and exists.
-        throw new HTTPException(404, {
-          message: 'User not found, cannot update.',
-        })
-      }
-      // The user object from better-auth might not have all these fields.
-      // We return the updated profile from the DB.
-      return c.json(updatedUsers[0])
-    } catch (error) {
-      if (error instanceof HTTPException) throw error
-      console.error(`Error updating profile for user ${user.id}:`, error)
-      // Check for specific DB errors if needed, e.g., unique constraint violation on username if it were updatable here.
-      throw new HTTPException(500, { message: 'Failed to update user profile' })
-    }
-  },
-)
-
-// GET /api/users/me/profile - Fetch current authenticated user's profile AND their posts
-userRoutes.get(
-  '/me/profile',
-  requireAuthMiddleware,
-  zValidator('query', paginationQuerySchema, (result, c) => {
-    if (!result.success) {
-      throw new HTTPException(400, {
-        message: 'Invalid pagination parameters',
-        cause: result.error.flatten(),
-      })
-    }
-  }),
-  async (c) => {
-    const user = c.get('user')
-    const { limit, offset } = c.req.valid('query')
-
-    if (!user || !user.id) {
-      throw new HTTPException(500, {
-        message: 'User context not found after auth.',
-      })
-    }
-
-    try {
-      // 1. Fetch user details
-      const userProfileFromDb = await db.query.users.findFirst({
-        where: eq(users.id, user.id),
-        columns: {
-          id: true,
-          username: true,
-          name: true,
-          email: true,
-          image: true,
-          bio: true,
-          bannerUrl: true, // Corrected: should be true to select the column
-          vibe_energy: true,
-          followerCount: true,
-          followingCount: true,
-          createdAt: true,
-        },
-      })
-
-      if (!userProfileFromDb) {
-        throw new HTTPException(404, {
-          message: 'Authenticated user profile not found.',
-        })
-      }
-
-      // Map to the UserProfile structure (frontend expects camelCase vibeEnergy)
-      const userForResponse = {
-        id: userProfileFromDb.id,
-        username: userProfileFromDb.username,
-        name: userProfileFromDb.name,
-        email: userProfileFromDb.email,
-        image: userProfileFromDb.image,
-        bio: userProfileFromDb.bio,
-        bannerUrl: userProfileFromDb.bannerUrl, // Add bannerUrl mapping
-        vibeEnergy: userProfileFromDb.vibe_energy, // Map to camelCase
-        followerCount: userProfileFromDb.followerCount,
-        followingCount: userProfileFromDb.followingCount,
-        createdAt: userProfileFromDb.createdAt,
-      }
-
-      // 2. Fetch user's posts (paginated)
-      const userPosts = await db.query.posts.findMany({
-        where: eq(posts.authorId, user.id), // No visibility filter for own posts, or filter as desired
-        columns: {
-          id: true,
-          title: true,
-          coverImg: true,
-          likeCount: true,
-          commentCount: true,
-          viewCount: true,
-          remixCount: true,
-          createdAt: true,
-          visibility: true, // Good to have for own posts view
-        },
-        orderBy: (postsTable, { desc }) => [desc(postsTable.createdAt)],
-        limit: limit,
-        offset: offset,
-      })
-
-      const hasNextPage = userPosts.length === limit
-
-      return c.json({
-        user: userForResponse, // Use the explicitly mapped user object
-        posts: {
-          items: userPosts,
-          pageInfo: {
-            hasNextPage,
-            nextOffset: hasNextPage ? offset + limit : null,
-          },
-        },
-      })
-    } catch (error) {
-      if (error instanceof HTTPException) {
-        throw error
-      }
-      console.error(`Error fetching profile data for user ${user.id}:`, error)
-      throw new HTTPException(500, {
-        message: 'Failed to fetch user profile data',
       })
     }
   },

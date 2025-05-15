@@ -400,7 +400,7 @@ export default function UserProfilePage({ params }: UserProfilePageProps) {
                 : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
             }`}
           >
-            Saved
+            Bookmarks
           </button>
 
           <button

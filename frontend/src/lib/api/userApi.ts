@@ -5,7 +5,7 @@ import type { PostDetails } from './postApi' // Import PostDetails
 
 // Individual post item for the user's gallery
 export interface ProfilePostItem {
-  id: number
+  id: string
   title: string | null
   coverImg: string | null
   likeCount: number | null
@@ -121,9 +121,9 @@ export const getMyProfile = async (pagination?: {
     queryParams.append('offset', String(pagination.offset))
   }
   const queryString = queryParams.toString() ? `?${queryParams.toString()}` : ''
-  // Assuming the backend endpoint /users/me/profile now returns UserProfileData
-  // and accepts pagination parameters.
-  return apiClient<UserProfileData>(`/users/me/profile${queryString}`)
+  return apiClient<UserProfileData>(`/users/me/profile${queryString}`, {
+    credentials: 'include', // Added to ensure authentication cookies/headers are sent
+  })
 }
 
 export interface UpdateUserProfilePayload {
@@ -141,7 +141,7 @@ export const updateUserProfile = async (
 ): Promise<UserProfile> => {
   // Construct FormData
   const formData = new FormData()
-  Object.entries(payload).forEach(([key, value]) => {
+  for (const [key, value] of Object.entries(payload)) {
     if (value !== undefined && value !== null) {
       if (value instanceof File) {
         formData.append(key, value)
@@ -153,7 +153,7 @@ export const updateUserProfile = async (
         formData.append(key, String(value))
       }
     }
-  })
+  }
 
   return apiClient<UserProfile>('/users/me/profile', {
     method: 'PUT',
@@ -280,7 +280,7 @@ export interface NotificationActor {
 
 // Type for the related post in a notification
 export interface NotificationPost {
-  id: number
+  id: string
   title: string | null
   coverImg: string | null // Added cover image
 }
@@ -441,7 +441,7 @@ export interface BookmarkedPostAuthor {
 
 // Type for a single bookmarked post item
 export interface BookmarkedPostItem {
-  id: number
+  id: string
   title: string | null
   coverImg: string | null
   createdAt: string | null // ISO string of post creation

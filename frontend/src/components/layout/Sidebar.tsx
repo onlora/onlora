@@ -59,7 +59,7 @@ export default function Sidebar() {
   // Close mobile menu on navigation
   useEffect(() => {
     setIsMobileMenuOpen(false)
-  }, [pathname])
+  }, [])
 
   // Check if the given path is active
   const isActive = (path: string) => {
@@ -116,7 +116,7 @@ export default function Sidebar() {
 
   const profileItems = [
     {
-      path: '/profile',
+      path: user ? `/u/${user.id}` : '/',
       icon: <User className="h-5 w-5" />,
       label: 'Profile',
     },
