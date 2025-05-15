@@ -177,7 +177,7 @@ export default function Sidebar() {
       <div className="mt-4">
         <button
           type="button"
-          className="w-full px-4 py-3 rounded-xl hover:bg-muted/50 cursor-pointer text-left flex items-center justify-between"
+          className="w-full px-4 py-3 rounded-xl hover:bg-muted/80 active:bg-muted cursor-pointer text-left flex items-center justify-between transition-all"
           onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
           aria-expanded={isProfileMenuOpen}
           aria-haspopup="true"
@@ -198,9 +198,9 @@ export default function Sidebar() {
             </div>
           </div>
           {isProfileMenuOpen ? (
-            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+            <ChevronUp className="h-5 w-5 text-muted-foreground" />
           ) : (
-            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            <ChevronDown className="h-5 w-5 text-muted-foreground" />
           )}
         </button>
 
@@ -211,7 +211,7 @@ export default function Sidebar() {
               <Link
                 key={item.path}
                 href={item.path}
-                className={`flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all hover:bg-muted/50 ${
+                className={`flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all hover:bg-muted/50 active:bg-muted ${
                   isActive(item.path)
                     ? 'text-primary bg-primary/5'
                     : 'text-muted-foreground hover:text-foreground'
@@ -226,7 +226,7 @@ export default function Sidebar() {
             <button
               type="button"
               onClick={handleSignOut}
-              className="flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all hover:bg-muted/50 text-muted-foreground hover:text-foreground w-full"
+              className="flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all hover:bg-muted/50 active:bg-muted text-muted-foreground hover:text-foreground w-full"
             >
               <LogOut className="h-5 w-5 mr-3" />
               <span>Log out</span>

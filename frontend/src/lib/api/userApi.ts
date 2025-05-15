@@ -243,6 +243,31 @@ export const getMyLikedPosts = async (pagination?: {
   })
 }
 
+/**
+ * Fetches posts liked by a specific user by their ID.
+ * @param userId - The ID of the user whose liked posts to fetch.
+ * @param pagination - Pagination parameters.
+ */
+export const getUserLikedPosts = async (
+  userId: string,
+  pagination: {
+    limit: number
+    offset: number
+  },
+): Promise<ProfilePostsPage> => {
+  const queryParams = new URLSearchParams()
+  queryParams.set('limit', String(pagination.limit))
+  queryParams.set('offset', String(pagination.offset))
+  const queryString = queryParams.toString()
+
+  return apiClient<ProfilePostsPage>(
+    `/users/${userId}/liked-posts?${queryString}`,
+    {
+      credentials: 'include', // Include credentials for potential auth checks
+    },
+  )
+}
+
 // --- Notification Types --- //
 
 // Type for the actor (user who performed the action)
@@ -459,6 +484,30 @@ export async function getMyBookmarkedPosts(params: {
     `/users/me/bookmarks?${queryString}`,
     {
       credentials: 'include', // Endpoint requires authentication
+    },
+  )
+}
+
+/**
+ * Fetches posts bookmarked by a specific user by their ID.
+ * Note: The backend only allows fetching public bookmarks
+ */
+export async function getUserBookmarkedPosts(
+  userId: string,
+  params: {
+    limit: number
+    offset: number
+  },
+): Promise<BookmarkedPostsResponse> {
+  const queryParams = new URLSearchParams()
+  queryParams.set('limit', String(params.limit))
+  queryParams.set('offset', String(params.offset))
+  const queryString = queryParams.toString()
+
+  return apiClient<BookmarkedPostsResponse>(
+    `/users/${userId}/bookmarks?${queryString}`,
+    {
+      credentials: 'include', // Include credentials for potential auth checks
     },
   )
 }

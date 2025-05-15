@@ -1332,4 +1332,216 @@ userRoutes.get(
   },
 )
 
+// GET /api/users/:userId/bookmarks - Get public posts bookmarked by a specific user
+userRoutes.get(
+  '/:userId/bookmarks',
+  zValidator(
+    'param',
+    z.object({
+      userId: z.string().min(1),
+    }),
+    (result, c) => {
+      if (!result.success) {
+        return c.json({ error: 'Invalid user ID' }, 400)
+      }
+    },
+  ),
+  zValidator('query', paginationQuerySchema, (result, c) => {
+    if (!result.success) {
+      return c.json(
+        { error: 'Validation failed', details: result.error.flatten() },
+        400,
+      )
+    }
+  }),
+  async (c) => {
+    const { userId } = c.req.valid('param')
+    const { limit, offset } = c.req.valid('query')
+
+    try {
+      // Check if user exists
+      const userExists = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: { id: true },
+      })
+
+      if (!userExists) {
+        return c.json({ error: 'User not found' }, 404)
+      }
+
+      // Get only publicly visible bookmarked posts
+      const results = await db.query.bookmarks.findMany({
+        where: eq(bookmarks.userId, userId),
+        orderBy: [desc(bookmarks.createdAt)],
+        limit: limit,
+        offset: offset,
+        with: {
+          post: {
+            columns: {
+              id: true,
+              title: true,
+              coverImg: true,
+              createdAt: true,
+              likeCount: true,
+              commentCount: true,
+              viewCount: true,
+              remixCount: true,
+              visibility: true,
+              authorId: true,
+            },
+            with: {
+              author: {
+                columns: { id: true, name: true, image: true, username: true },
+              },
+            },
+          },
+        },
+      })
+
+      // Map results and filter out private posts
+      const mappedBookmarks = results.map((b) => {
+        if (!b.post || b.post.visibility !== 'public') {
+          return null
+        }
+        const postDetails = b.post
+        const authorDetails = postDetails.author
+
+        return {
+          id: postDetails.id,
+          title: postDetails.title,
+          coverImg: postDetails.coverImg,
+          createdAt: postDetails.createdAt?.toISOString() ?? null,
+          author: authorDetails
+            ? {
+                id: authorDetails.id,
+                name: authorDetails.name,
+                image: authorDetails.image,
+                username: authorDetails.username,
+              }
+            : null,
+          likeCount: postDetails.likeCount,
+          commentCount: postDetails.commentCount,
+          viewCount: postDetails.viewCount,
+          remixCount: postDetails.remixCount,
+          bookmarkedAt: b.createdAt?.toISOString() ?? null,
+        }
+      })
+
+      // Filter out the null values
+      const formattedBookmarks = mappedBookmarks.filter((item) => item !== null)
+
+      // Get total count for pagination
+      const totalBookmarksCountResult = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(bookmarks)
+        .innerJoin(posts, eq(bookmarks.postId, posts.id))
+        .where(
+          and(eq(bookmarks.userId, userId), eq(posts.visibility, 'public')),
+        )
+
+      const totalCount = totalBookmarksCountResult[0]?.count ?? 0
+      const totalPages = Math.ceil(totalCount / limit)
+
+      return c.json({
+        data: formattedBookmarks,
+        meta: {
+          limit,
+          offset: offset,
+          totalCount,
+          totalPages,
+          currentPage: Math.floor(Number(offset) / limit) + 1,
+        },
+      })
+    } catch (error) {
+      console.error('Error fetching bookmarked posts for user:', userId, error)
+      throw new HTTPException(500, {
+        message: 'Failed to fetch bookmarked posts',
+      })
+    }
+  },
+)
+
+// GET /api/users/:userId/liked-posts - Get posts liked by a specific user
+userRoutes.get(
+  '/:userId/liked-posts',
+  zValidator(
+    'param',
+    z.object({
+      userId: z.string().min(1),
+    }),
+    (result, c) => {
+      if (!result.success) {
+        return c.json({ error: 'Invalid user ID' }, 400)
+      }
+    },
+  ),
+  zValidator('query', paginationQuerySchema, (result, c) => {
+    if (!result.success) {
+      return c.json(
+        { error: 'Validation failed', details: result.error.flatten() },
+        400,
+      )
+    }
+  }),
+  async (c) => {
+    const { userId } = c.req.valid('param')
+    const { limit, offset } = c.req.valid('query')
+
+    try {
+      // Check if user exists
+      const userExists = await db.query.users.findFirst({
+        where: eq(users.id, userId),
+        columns: { id: true },
+      })
+
+      if (!userExists) {
+        return c.json({ error: 'User not found' }, 404)
+      }
+
+      // Fetch liked posts - only publicly visible ones
+      const likedPostsQuery = await db
+        .select({
+          id: posts.id,
+          title: posts.title,
+          coverImg: posts.coverImg,
+          likeCount: posts.likeCount,
+          commentCount: posts.commentCount,
+          viewCount: posts.viewCount,
+          remixCount: posts.remixCount,
+          createdAt: posts.createdAt,
+        })
+        .from(likes)
+        .innerJoin(posts, eq(likes.postId, posts.id))
+        .where(and(eq(likes.userId, userId), eq(posts.visibility, 'public')))
+        .orderBy(desc(likes.createdAt))
+        .limit(limit)
+        .offset(offset)
+
+      // Get total count for pagination
+      const totalLikedPostsCountResult = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(likes)
+        .innerJoin(posts, eq(likes.postId, posts.id))
+        .where(and(eq(likes.userId, userId), eq(posts.visibility, 'public')))
+
+      const totalCount = totalLikedPostsCountResult[0]?.count ?? 0
+      const totalPages = Math.ceil(totalCount / limit)
+
+      return c.json({
+        items: likedPostsQuery,
+        pageInfo: {
+          hasNextPage: likedPostsQuery.length === limit,
+          nextOffset:
+            likedPostsQuery.length === limit ? Number(offset) + limit : null,
+        },
+      })
+    } catch (error) {
+      console.error('Error fetching liked posts for user:', userId, error)
+      throw new HTTPException(500, {
+        message: 'Failed to fetch liked posts',
+      })
+    }
+  },
+)
+
 export default userRoutes

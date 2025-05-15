@@ -4,6 +4,7 @@ import { useSession } from '@/lib/authClient'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
@@ -709,20 +710,25 @@ export default function PostDetailPage() {
             <div className="p-5 border-b border-gray-100">
               <div className="flex items-center justify-between">
                 <div className="flex items-center flex-1">
-                  <Avatar className="h-9 w-9 rounded-full">
-                    <AvatarImage
-                      src={post.author?.image ?? undefined}
-                      alt={post.author?.name ?? 'Author'}
-                    />
-                    <AvatarFallback>
-                      {getInitials(post.author?.name)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="ml-2.5 flex-1 min-w-0">
-                    <div className="font-medium text-[15px] truncate">
-                      {post.author?.name || 'Anonymous'}
+                  <Link
+                    href={`/u/${post.author?.username || post.author?.id}`}
+                    className="flex items-center group"
+                  >
+                    <Avatar className="h-9 w-9 rounded-full">
+                      <AvatarImage
+                        src={post.author?.image ?? undefined}
+                        alt={post.author?.name ?? 'Author'}
+                      />
+                      <AvatarFallback>
+                        {getInitials(post.author?.name)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="ml-2.5 flex-1 min-w-0">
+                      <div className="font-medium text-[15px] truncate group-hover:text-primary transition-colors">
+                        {post.author?.name || 'Anonymous'}
+                      </div>
                     </div>
-                  </div>
+                  </Link>
                 </div>
                 <Button
                   variant={post.author?.isFollowing ? 'outline' : 'default'}
