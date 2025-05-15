@@ -622,9 +622,9 @@ export default function PostDetailPage() {
     <div className="max-w-5xl mx-auto">
       {/* Main post container */}
       <div className="bg-white rounded-[32px] shadow-sm overflow-hidden">
-        <div className="flex flex-col md:flex-row h-[80vh]">
-          {/* Image section */}
-          <div className="md:w-[60%] h-full relative overflow-hidden rounded-l-[32px] bg-[#f5f5f7]">
+        <div className="flex flex-col md:flex-row md:h-[80vh]">
+          {/* Image section - Full height on mobile, 60% width on desktop */}
+          <div className="w-full md:w-[60%] h-[50vh] md:h-full relative overflow-hidden md:rounded-l-[32px] bg-[#f5f5f7]">
             {/* Heavily blurred background image */}
             {currentImageUrl && (
               <div
@@ -637,7 +637,7 @@ export default function PostDetailPage() {
             )}
 
             {/* Main image container with centered content */}
-            <div className="relative z-10 w-full h-full flex items-center justify-center p-8">
+            <div className="relative z-10 w-full h-full flex items-center justify-center p-4 md:p-8">
               {currentImageUrl && (
                 <img
                   src={currentImageUrl}
@@ -651,34 +651,34 @@ export default function PostDetailPage() {
             {totalImages > 1 && (
               <>
                 {/* Image counter - top right with improved styling */}
-                <div className="absolute top-6 right-6 z-20 px-3 py-1 rounded-full bg-black/25 backdrop-blur-sm text-white text-sm shadow-sm">
+                <div className="absolute top-4 md:top-6 right-4 md:right-6 z-20 px-3 py-1 rounded-full bg-black/25 backdrop-blur-sm text-white text-sm shadow-sm">
                   {currentImageIndex + 1}/{totalImages}
                 </div>
 
                 {/* Navigation arrows - more subtle styling */}
                 <div className="absolute inset-0 z-20 opacity-0 hover:opacity-100 transition-opacity duration-200">
-                  <div className="absolute inset-0 flex items-center justify-between px-8">
+                  <div className="absolute inset-0 flex items-center justify-between px-4 md:px-8">
                     <button
                       type="button"
-                      className="w-10 h-10 rounded-full bg-black/25 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/40 transition-colors focus:outline-none shadow-lg"
+                      className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-black/25 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/40 transition-colors focus:outline-none shadow-lg"
                       onClick={handlePrevImage}
                       aria-label="Previous image"
                     >
-                      <ChevronLeft className="h-5 w-5" />
+                      <ChevronLeft className="h-4 w-4 md:h-5 md:w-5" />
                     </button>
                     <button
                       type="button"
-                      className="w-10 h-10 rounded-full bg-black/25 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/40 transition-colors focus:outline-none shadow-lg"
+                      className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-black/25 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/40 transition-colors focus:outline-none shadow-lg"
                       onClick={handleNextImage}
                       aria-label="Next image"
                     >
-                      <ChevronRight className="h-5 w-5" />
+                      <ChevronRight className="h-4 w-4 md:h-5 md:w-5" />
                     </button>
                   </div>
                 </div>
 
                 {/* Bottom dots - more subtle styling */}
-                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-black/25 backdrop-blur-sm">
+                <div className="absolute bottom-4 md:bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center space-x-1.5 px-3 py-1.5 rounded-full bg-black/25 backdrop-blur-sm">
                   {post?.imagesForClient?.map((img, i) => (
                     <button
                       key={`image-dot-${img.id || i}`}
@@ -702,7 +702,7 @@ export default function PostDetailPage() {
 
           {/* Content section */}
           <div
-            className="flex flex-col flex-1 h-full md:w-[40%] bg-white"
+            className="flex flex-col flex-1 md:h-full w-full md:w-[40%] bg-white"
             style={{ borderRadius: '0 32px 32px 0' }}
           >
             {/* Author info section - fixed */}

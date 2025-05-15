@@ -2,8 +2,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Card, CardContent } from '@/components/ui/card'
 import type { FeedPost } from '@/lib/api/feedApi'
 import { getInitials } from '@/lib/utils'
-import { formatDistanceToNowStrict } from 'date-fns'
-import { Heart, MessageCircle } from 'lucide-react'
+import { Heart, Play } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import type React from 'react'
@@ -17,80 +16,88 @@ const FeedPostCard: React.FC<FeedPostCardProps> = ({ post }) => {
   const authorUsername = post.author?.username
   const authorImage = post.author?.image
 
-  const postCreationDate = post.createdAt
-    ? formatDistanceToNowStrict(new Date(post.createdAt), { addSuffix: true })
-    : ''
+  // Determine if this is likely a video post
+  const isVideoPost = post.coverImg?.includes('video')
 
   return (
-    <Card className="overflow-hidden rounded-xl border-none hover:shadow-sm transition-all">
-      <div className="relative">
+    <Card className="overflow-hidden border-none bg-transparent shadow-none hover:bg-white/50 transition-all duration-200 rounded-lg group flex flex-col gap-1 py-0">
+      <div className="relative w-full">
         {post.coverImg ? (
           <Link
             href={`/posts/${post.id}`}
-            className="block relative overflow-hidden aspect-[3/4]"
+            className="block relative overflow-hidden rounded-2xl"
           >
-            <Image
-              src={post.coverImg}
-              alt={post.title ?? 'Post image'}
-              fill
-              className="object-cover transition-transform duration-300 ease-in-out hover:scale-105"
-              sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-            />
-            <div className="absolute bottom-3 right-3 bg-black/30 backdrop-blur-sm text-white px-2.5 py-1.5 rounded-full text-xs flex items-center">
-              <Heart className="w-3.5 h-3.5 mr-1" />
-              <span className="mr-3">{post.likeCount ?? 0}</span>
-              <MessageCircle className="w-3.5 h-3.5 mr-1" />
-              <span>{post.commentCount ?? 0}</span>
+            <div className="relative w-full">
+              <Image
+                src={post.coverImg}
+                alt={post.title ?? 'Post image'}
+                width={300}
+                height={300}
+                className="object-cover transition-transform duration-300 ease-in-out group-hover:scale-[1.02] w-full"
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                style={{ width: '100%', height: 'auto', display: 'block' }}
+                unoptimized
+              />
+
+              {/* Video play button overlay if it's a video */}
+              {isVideoPost && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="rounded-full bg-black/30 backdrop-blur-sm p-2">
+                    <Play className="w-5 h-5 text-white" />
+                  </div>
+                </div>
+              )}
+
+              {/* Very subtle gradient overlay */}
+              <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/10 opacity-0 group-hover:opacity-100 transition-opacity" />
             </div>
           </Link>
         ) : (
-          <div className="bg-muted aspect-[3/4] flex items-center justify-center">
-            <span className="text-muted-foreground">No Image</span>
+          <div className="bg-gray-100 rounded-xl flex items-center justify-center h-[180px]">
+            <span className="text-muted-foreground text-xs">No Image</span>
           </div>
         )}
       </div>
 
-      <CardContent className="pt-3 pb-2 px-3">
-        <Link href={`/posts/${post.id}`} className="block">
-          <h3 className="text-sm font-medium leading-tight line-clamp-2 hover:text-primary transition-colors">
+      <CardContent className="pt-3 pb-2 px-1">
+        <Link href={`/posts/${post.id}`}>
+          <h3 className="text-xs sm:text-sm font-medium leading-tight line-clamp-2 group-hover:text-primary transition-colors">
             {post.title || 'Untitled Post'}
           </h3>
         </Link>
 
-        <div className="flex items-center mt-2 pt-2 border-t border-border/50">
+        <div className="flex items-center justify-between mt-2">
           {post.author ? (
             <Link
               href={`/u/${authorUsername || post.author.id}`}
               className="flex items-center group"
             >
-              <Avatar className="h-6 w-6 mr-1.5 border">
+              <Avatar className="h-5 w-5 mr-1.5 border">
                 <AvatarImage src={authorImage ?? undefined} alt={authorName} />
-                <AvatarFallback className="text-[9px]">
+                <AvatarFallback className="text-[8px]">
                   {getInitials(authorName)}
                 </AvatarFallback>
               </Avatar>
-              <span className="text-xs text-muted-foreground truncate max-w-[100px] group-hover:text-primary transition-colors">
+              <span className="text-xs text-muted-foreground truncate max-w-[80px] group-hover:text-primary transition-colors">
                 {authorName}
               </span>
             </Link>
           ) : (
             <div className="flex items-center">
-              <Avatar className="h-6 w-6 mr-1.5">
-                <AvatarFallback className="text-[9px]">??</AvatarFallback>
+              <Avatar className="h-5 w-5 mr-1.5 border">
+                <AvatarFallback className="text-[8px]">??</AvatarFallback>
               </Avatar>
-              <span className="text-xs text-muted-foreground truncate max-w-[100px]">
+              <span className="text-xs text-muted-foreground truncate max-w-[80px]">
                 Unknown
               </span>
             </div>
           )}
 
-          <div className="ml-auto flex items-center text-xs text-muted-foreground">
-            {post.likeCount !== null && post.likeCount > 0 && (
-              <div className="flex items-center ml-2" title="Likes">
-                <Heart className="w-3 h-3 mr-0.5 fill-current" />
-                <span>{post.likeCount}</span>
-              </div>
-            )}
+          <div className="flex items-center text-xs text-muted-foreground">
+            <div className="flex items-center gap-1" title="Likes">
+              <Heart className="w-4 h-4" />
+              <span>{post.likeCount ?? 0}</span>
+            </div>
           </div>
         </div>
       </CardContent>

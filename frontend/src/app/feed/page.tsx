@@ -15,6 +15,7 @@ import { type InfiniteData, useInfiniteQuery } from '@tanstack/react-query'
 import { Loader2, LogIn, ServerCrash } from 'lucide-react'
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import type React from 'react'
 
 type FeedType = 'latest' | 'trending' | 'recommended' | 'following'
 
@@ -41,6 +42,14 @@ interface FeedSectionProps {
   feedType: FeedType
   isAuthenticated: boolean
   isAuthLoading: boolean
+}
+
+function ResponsiveGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2 sm:gap-3">
+      {children}
+    </div>
+  )
 }
 
 function FeedSection({
@@ -149,18 +158,20 @@ function FeedSection({
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6 py-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+    <div className="space-y-6 py-4">
+      <ResponsiveGrid>
         {posts.map((post) => (
           <FeedPostCard key={`${feedType}-${post.id}`} post={post} />
         ))}
-      </div>
+      </ResponsiveGrid>
+
       {hasNextPage && (
-        <div className="text-center mt-6">
+        <div className="text-center mt-8">
           <Button
             onClick={() => fetchNextPage()}
             disabled={isFetchingNextPage}
             variant="outline"
+            className="rounded-full px-8 py-1.5 text-sm font-medium border-gray-300 hover:bg-gray-100"
           >
             {isFetchingNextPage ? (
               <>
@@ -168,7 +179,7 @@ function FeedSection({
                 Loading more...
               </>
             ) : (
-              'Load More'
+              'Load more'
             )}
           </Button>
         </div>
@@ -186,45 +197,50 @@ export default function FeedPage() {
     return !!sessionData?.user
   }, [isAuthLoading, sessionData])
 
-  // TODO: Consider if 'recommended' feed should also have some auth-dependent behavior (e.g. personalization signal) - Partially addressed by queryKey
-
   return (
-    <div className="container mx-auto px-2 sm:px-4 py-4 sm:py-6 max-w-7xl">
-      <h1 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4 sm:mb-6">
-        Explore Vibes
-      </h1>
+    <div className="min-h-screen bg-gray-50/50">
+      <div className="container mx-auto px-2 sm:px-4 py-4 sm:py-6 max-w-7xl">
+        {/* Simple header area */}
+        <div className="flex justify-between items-center mb-4 sm:mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
+            Discover
+          </h1>
 
-      <Tabs
-        defaultValue="latest"
-        onValueChange={(value) => setActiveTab(value as FeedType)}
-        className="w-full"
-      >
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 mb-4 sm:mb-6 h-auto">
+          {/* Could add search or other actions here */}
+        </div>
+
+        <Tabs
+          defaultValue="latest"
+          onValueChange={(value) => setActiveTab(value as FeedType)}
+          className="w-full"
+        >
+          <TabsList className="mb-6 h-auto border-b border-gray-100 bg-transparent p-0 w-auto inline-flex gap-8">
+            {(Object.keys(FEED_TITLES) as FeedType[]).map((feedKey) => (
+              <TabsTrigger
+                key={feedKey}
+                value={feedKey}
+                className="py-2.5 px-1 text-sm data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-black data-[state=active]:border-b-2 data-[state=active]:border-black rounded-none text-gray-500 font-medium"
+              >
+                {FEED_TITLES[feedKey]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+
           {(Object.keys(FEED_TITLES) as FeedType[]).map((feedKey) => (
-            <TabsTrigger
+            <TabsContent
               key={feedKey}
               value={feedKey}
-              className="py-2 sm:py-2.5 text-sm sm:text-base"
+              className="focus-visible:ring-0 focus-visible:ring-offset-0"
             >
-              {FEED_TITLES[feedKey]}
-            </TabsTrigger>
+              <FeedSection
+                feedType={feedKey}
+                isAuthenticated={isAuthenticated}
+                isAuthLoading={isAuthLoading}
+              />
+            </TabsContent>
           ))}
-        </TabsList>
-
-        {(Object.keys(FEED_TITLES) as FeedType[]).map((feedKey) => (
-          <TabsContent
-            key={feedKey}
-            value={feedKey}
-            className="focus-visible:ring-0 focus-visible:ring-offset-0"
-          >
-            <FeedSection
-              feedType={feedKey}
-              isAuthenticated={isAuthenticated}
-              isAuthLoading={isAuthLoading}
-            />
-          </TabsContent>
-        ))}
-      </Tabs>
+        </Tabs>
+      </div>
     </div>
   )
 }
