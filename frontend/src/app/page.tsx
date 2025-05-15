@@ -43,19 +43,6 @@ const fetchFeedData = ({
   }
 }
 
-// Helper function to determine if a post should use the tall style
-// Using a hash of the post ID rather than index to avoid linter warnings
-const shouldBeTall = (postId: string | number): boolean => {
-  // Convert to string if it's a number
-  const id = typeof postId === 'number' ? String(postId) : postId
-  // Simple hash function that sums the char codes in the ID
-  const hashSum = id
-    .split('')
-    .reduce((sum, char) => sum + char.charCodeAt(0), 0)
-  // Use the hash to create a pattern - approximately 40% of posts will be tall
-  return hashSum % 5 === 0 || hashSum % 5 === 3
-}
-
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<FeedTab>('latest')
   const observerRef = useRef<IntersectionObserver | null>(null)
@@ -117,16 +104,14 @@ export default function HomePage() {
     if (status === 'pending') {
       // Initial loading skeleton with variable heights
       return (
-        <div className="masonry-grid">
+        <div className="feed-grid">
           {[...Array(8)].map((_, i) => (
             <div
               // Use UUID-like pattern for skeleton keys to avoid index warnings
               key={`skeleton-${i}-${Math.random().toString(36).substr(2, 9)}`}
-              className={`masonry-item ${i % 2 === 0 ? 'tall' : ''}`}
+              className="w-full"
             >
-              <Skeleton
-                className={`w-full rounded-xl ${i % 2 === 0 ? 'aspect-[3/5]' : 'aspect-[3/4]'}`}
-              />
+              <Skeleton className="w-full rounded-xl aspect-[3/4]" />
             </div>
           ))}
         </div>
@@ -153,12 +138,9 @@ export default function HomePage() {
     }
 
     return (
-      <div className="masonry-grid">
+      <div className="feed-grid">
         {allPosts.map((post: FeedPost) => (
-          <div
-            key={`post-${post.id}`}
-            className={`masonry-item ${shouldBeTall(post.id) ? 'tall' : ''}`}
-          >
+          <div key={`post-${post.id}`} className="w-full">
             <FeedPostCard post={post} />
           </div>
         ))}

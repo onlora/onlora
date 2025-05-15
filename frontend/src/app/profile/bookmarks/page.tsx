@@ -93,7 +93,7 @@ export default function BookmarksPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {[...Array(BOOKMARKS_PAGE_SIZE)].map((_, i) => (
             <div
-              key={`skel-bookmark-${i}`}
+              key={`skel-bookmark-${i}-${Math.random().toString(36).substr(2, 9)}`}
               className="border rounded-lg overflow-hidden shadow-sm"
             >
               <div className="p-4 sm:p-5 space-y-3">
@@ -155,7 +155,7 @@ export default function BookmarksPage() {
       )}
 
       {allBookmarkedPosts.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="feed-grid">
           {allBookmarkedPosts.map((bookmarkItem) => {
             const postForCard: FeedPost = {
               id: bookmarkItem.id,
@@ -177,10 +177,9 @@ export default function BookmarksPage() {
               score: undefined,
             }
             return (
-              <FeedPostCard
-                key={`bookmark-${bookmarkItem.id}`}
-                post={postForCard}
-              />
+              <div key={`bookmark-${bookmarkItem.id}`} className="w-full">
+                <FeedPostCard post={postForCard} />
+              </div>
             )
           })}
         </div>

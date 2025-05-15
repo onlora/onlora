@@ -12,7 +12,7 @@ export interface FeedPostAuthor {
 
 // Type for a single post item in the feed (standardized)
 export interface FeedPost {
-  id: number
+  id: string
   title: string | null
   coverImg: string | null // URL for the cover image
   createdAt: string | null // ISO date string
@@ -47,7 +47,7 @@ interface RawFeedItemAuthorNested {
 }
 
 interface RawFeedItem {
-  id: number
+  id: string
   title: string | null
   coverImg: string | null
   createdAt: string | null

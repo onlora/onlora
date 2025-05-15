@@ -425,7 +425,7 @@ export default function UserProfilePage({ params }: UserProfilePageProps) {
               <p className="text-muted-foreground">No posts published yet</p>
             </div>
           ) : (
-            <div className="masonry-grid">
+            <div className="feed-grid">
               {allPosts.map((post: ProfilePostItem) => {
                 // Convert ProfilePostItem to FeedPost format for FeedPostCard
                 const feedPost: FeedPost = {
@@ -473,7 +473,7 @@ export default function UserProfilePage({ params }: UserProfilePageProps) {
               <p className="text-muted-foreground">No saved content yet</p>
             </div>
           ) : (
-            <div className="masonry-grid">
+            <div className="feed-grid">
               {allBookmarks.map((bookmark: BookmarkedPostItem) => {
                 // Convert BookmarkedPostItem to FeedPost format for FeedPostCard
                 const feedPost: FeedPost = {
@@ -523,7 +523,7 @@ export default function UserProfilePage({ params }: UserProfilePageProps) {
               <p className="text-muted-foreground">No liked content yet</p>
             </div>
           ) : (
-            <div className="masonry-grid">
+            <div className="feed-grid">
               {allLikedPosts.map((post: ProfilePostItem) => {
                 // Convert ProfilePostItem to FeedPost format for FeedPostCard
                 const feedPost: FeedPost = {
