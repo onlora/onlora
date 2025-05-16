@@ -2,39 +2,40 @@
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import {
-  type VeHistoryPage,
   type VeTransactionItem,
+  getMyProfile,
   getMyVeHistory,
 } from '@/lib/api/userApi'
 import { useSession } from '@/lib/authClient'
 import { cn } from '@/lib/utils'
-import { type InfiniteData, useInfiniteQuery } from '@tanstack/react-query'
-import { Info, Loader2, ServerCrash } from 'lucide-react'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { motion } from 'framer-motion'
+import {
+  ArrowDown,
+  ArrowUp,
+  Info,
+  Loader2,
+  ServerCrash,
+  Zap,
+} from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo } from 'react'
 
 const VE_HISTORY_PAGE_SIZE = 20
 
-function formatReason(reason: string | null, refId: number | null): string {
+function formatReason(reason: string | null, refId: string | null): string {
   if (!reason) return 'Unknown reason'
-  // Could expand this to be more descriptive based on reason codes
+
   return reason
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 }
 
-export default function VeHistoryPage() {
+export default function VeHistoryPageContent() {
   const { data: session, isPending: isAuthLoading } = useSession()
   const router = useRouter()
 
@@ -49,21 +50,27 @@ export default function VeHistoryPage() {
     }
   }, [isAuthenticated, isAuthLoading, router])
 
+  // Fetch user profile to get vibeEnergy
+  const {
+    data: profileData,
+    isLoading: isProfileLoading,
+    isError: isProfileError,
+  } = useQuery({
+    queryKey: ['myProfile'],
+    queryFn: () => getMyProfile(),
+    enabled: isAuthenticated,
+    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
+  })
+
   const {
     data,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-    isLoading,
-    isError,
-    error,
-  } = useInfiniteQuery<
-    VeHistoryPage,
-    Error,
-    InfiniteData<VeHistoryPage, number>,
-    [string],
-    number
-  >({
+    isLoading: isHistoryLoading,
+    isError: isHistoryError,
+    error: historyError,
+  } = useInfiniteQuery({
     queryKey: ['myVeHistory'],
     queryFn: async ({ pageParam = 0 }) => {
       return getMyVeHistory({
@@ -81,12 +88,15 @@ export default function VeHistoryPage() {
     staleTime: 1000 * 60 * 2, // Cache for 2 minutes
   })
 
+  const isLoading = isHistoryLoading || isProfileLoading
+  const isError = isHistoryError || isProfileError
+  const veBalance = profileData?.user?.vibeEnergy ?? 0
+
   if (isAuthLoading) {
     return (
-      <div className="p-4 md:p-6">
-        <h1 className="text-2xl font-semibold mb-4">VE History</h1>
+      <div className="p-4 md:p-8 max-w-2xl mx-auto">
         <div className="flex justify-center items-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
           <p className="ml-2 text-muted-foreground">
             Checking authentication...
           </p>
@@ -102,19 +112,25 @@ export default function VeHistoryPage() {
 
   if (isLoading) {
     return (
-      <div className="p-4 md:p-6">
-        <h1 className="text-2xl font-semibold mb-6">VE History</h1>
-        <div className="space-y-3">
-          {[...Array(10)].map((_, i) => (
+      <div className="p-4 md:p-8 max-w-2xl mx-auto">
+        <div className="mb-8 flex items-center">
+          <h1 className="text-2xl font-medium mr-auto">Vibe Energy</h1>
+          <Skeleton className="h-10 w-20" />
+        </div>
+
+        <Separator className="mb-6" />
+
+        <div className="space-y-3 mb-8">
+          {Array.from({ length: 5 }).map(() => (
             <div
-              key={`skel-ve-${i}`}
-              className="flex justify-between items-center p-3 border rounded-md"
+              key={`skeleton-${Math.random().toString(36).substring(2, 9)}`}
+              className="flex justify-between items-center px-3 py-3 border-b"
             >
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-3 w-20" />
               </div>
-              <Skeleton className="h-5 w-12" />
+              <Skeleton className="h-6 w-14" />
             </div>
           ))}
         </div>
@@ -124,10 +140,12 @@ export default function VeHistoryPage() {
 
   if (isError) {
     const errorMessage =
-      error instanceof Error ? error.message : 'An unknown error occurred'
+      historyError instanceof Error
+        ? historyError.message
+        : 'An unknown error occurred'
     return (
-      <div className="p-4 md:p-6">
-        <h1 className="text-2xl font-semibold mb-4">VE History</h1>
+      <div className="p-4 md:p-8 max-w-2xl mx-auto">
+        <h1 className="text-2xl font-medium mb-6">Vibe Energy</h1>
         <Alert variant="destructive">
           <ServerCrash className="h-4 w-4" />
           <AlertTitle>Error Loading VE History</AlertTitle>
@@ -140,13 +158,23 @@ export default function VeHistoryPage() {
   const allTransactions = data?.pages.flatMap((page) => page.items ?? []) ?? []
 
   return (
-    <div className="p-4 md:p-6">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold">VE History</h1>
-        <p className="text-muted-foreground">
-          Track your Vibe Energy earnings and spending.
-        </p>
-      </header>
+    <div className="p-4 md:p-8 max-w-2xl mx-auto">
+      <div className="flex items-center mb-3">
+        <h1 className="text-2xl font-medium mr-auto">Vibe Energy</h1>
+
+        {/* Simple Lightning Energy Indicator */}
+        <div className="flex items-center space-x-2 px-3 py-2 bg-green-100 rounded-xl shadow-sm">
+          <Zap className="relative z-10 h-5 w-5 text-green-600 rounded-2xl" />
+          <span className="font-semibold text-green-700  tabular-nums">
+            {veBalance}
+          </span>
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground mb-6">
+        Track your Vibe Energy earnings and spending
+      </p>
+
+      <Separator className="mb-6" />
 
       {allTransactions.length === 0 && (
         <Alert>
@@ -160,56 +188,70 @@ export default function VeHistoryPage() {
       )}
 
       {allTransactions.length > 0 && (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Amount</TableHead>
-                <TableHead>Reason</TableHead>
-                <TableHead className="text-right">Date</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {allTransactions.map((tx: VeTransactionItem) => (
-                <TableRow key={tx.id}>
-                  <TableCell
-                    className={cn(
-                      'font-medium',
-                      tx.delta >= 0 ? 'text-green-600' : 'text-red-600',
-                    )}
-                  >
-                    {tx.delta >= 0 ? `+${tx.delta}` : tx.delta} VE
-                  </TableCell>
-                  <TableCell>{formatReason(tx.reason, tx.refId)}</TableCell>
-                  <TableCell className="text-right text-muted-foreground">
-                    {new Date(tx.createdAt).toLocaleDateString()} -{' '}
-                    {new Date(tx.createdAt).toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <div className="mb-8">
+          {allTransactions.map((tx: VeTransactionItem, index) => (
+            <motion.div
+              key={tx.id}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.2 }}
+              className="flex items-center justify-between py-3 px-2 border-b last:border-0"
+            >
+              <div>
+                <div className="flex items-center">
+                  {tx.delta >= 0 ? (
+                    <div className="text-green-600 mr-1.5">
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    </div>
+                  ) : (
+                    <div className="text-red-600 mr-1.5">
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </div>
+                  )}
+                  <span className="font-medium text-sm">
+                    {formatReason(tx.reason, tx.refId)}
+                  </span>
+                </div>
+                <span className="text-xs text-muted-foreground ml-5">
+                  {new Date(tx.createdAt).toLocaleDateString()} ·{' '}
+                  {new Date(tx.createdAt).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              </div>
+
+              <span
+                className={cn(
+                  'text-sm font-medium tabular-nums',
+                  tx.delta >= 0
+                    ? 'text-green-600 dark:text-green-500'
+                    : 'text-red-600 dark:text-red-500',
+                )}
+              >
+                {tx.delta >= 0 ? `+${tx.delta}` : tx.delta}
+              </span>
+            </motion.div>
+          ))}
         </div>
       )}
 
       {hasNextPage && (
-        <div className="text-center mt-8">
+        <div className="text-center">
           <Button
             onClick={() => fetchNextPage()}
             disabled={isFetchingNextPage}
             variant="outline"
-            size="lg"
+            size="sm"
+            className="rounded-lg"
           >
             {isFetchingNextPage ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading more...
+                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                Loading
               </>
             ) : (
-              'Load More Transactions'
+              'Load More'
             )}
           </Button>
         </div>

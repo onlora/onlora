@@ -76,6 +76,9 @@ export async function getUserProfile(
 
   return apiClient<UserProfileData>(
     `/users/${profileUserId}/profile${queryString}`,
+    {
+      credentials: 'include',
+    },
   )
 }
 
@@ -103,6 +106,9 @@ export async function getUserProfileByUsername(
 
   return apiClient<UserProfileData>(
     `/users/by-username/${username}/profile${queryString}`,
+    {
+      credentials: 'include',
+    },
   )
 }
 
@@ -370,11 +376,11 @@ export const markAllNotificationsAsRead = async (): Promise<{
 
 // Type for a single VE transaction item
 export interface VeTransactionItem {
-  id: number
+  id: string // Changed from number to string (UUID)
   userId: string
   delta: number
   reason: string | null
-  refId: string | null
+  refId: string | null // This is a UUID in the database schema
   createdAt: string // ISO Date string
 }
 
@@ -385,6 +391,11 @@ export interface VeHistoryPage {
     hasNextPage: boolean
     nextOffset: number | null
   }
+}
+
+// Type for VE balance response
+export interface VeBalanceResponse {
+  balance: number
 }
 
 /**
@@ -405,6 +416,16 @@ export async function getMyVeHistory(params: {
       credentials: 'include', // Required to identify the user
     },
   )
+}
+
+/**
+ * Fetches the current user's Vibe Energy (VE) balance.
+ */
+export async function getMyVeBalance(): Promise<VeBalanceResponse> {
+  return apiClient<VeBalanceResponse>('/users/me/ve-balance', {
+    method: 'GET',
+    credentials: 'include', // Required to identify the user
+  })
 }
 
 // --- Bookmarked Posts --- //

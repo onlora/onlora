@@ -21,17 +21,17 @@ import { getInitials } from '@/lib/utils'
 import {
   type InfiniteData,
   useInfiniteQuery,
-  useMutation,
   useQueryClient,
 } from '@tanstack/react-query'
-import { Loader2, UserCheck, UserPlus } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { use } from 'react'
 import { toast } from 'sonner'
 
 interface UserProfilePageProps {
-  params: {
+  params: Promise<{
     userId: string
-  }
+  }>
 }
 
 const POSTS_PER_PAGE = 12
@@ -49,13 +49,21 @@ const shouldBeTall = (postId: string | number): boolean => {
 }
 
 export default function UserProfilePage({ params }: UserProfilePageProps) {
-  const { userId } = params
+  return <UserProfileContent key={use(params).userId} params={params} />
+}
+
+function UserProfileContent({ params }: UserProfilePageProps) {
+  const unwrappedParams = use(params)
+  const { userId } = unwrappedParams
   const queryClient = useQueryClient()
   const { data: session } = useSession()
   const loggedInUserId = session?.user?.id
   const [activeTab, setActiveTab] = useState<'posts' | 'saved' | 'likes'>(
     'posts',
   )
+  // State to track follow button UI independently from the query data
+  const [isFollowing, setIsFollowing] = useState<boolean | null>(null)
+  const [followLoading, setFollowLoading] = useState(false)
   const observerRef = useRef<IntersectionObserver | null>(null)
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
@@ -253,38 +261,57 @@ export default function UserProfilePage({ params }: UserProfilePageProps) {
   const allBookmarks = bookmarksData?.pages.flatMap((page) => page.data) ?? []
   const allLikedPosts = likesData?.pages.flatMap((page) => page.items) ?? []
 
+  // Initialize the isFollowing state from fetched data
+  useEffect(() => {
+    if (user?.isFollowing !== undefined) {
+      setIsFollowing(user.isFollowing)
+    }
+  }, [user?.isFollowing])
+
   const isOwnProfile = loggedInUserId === user?.id
 
-  const followMutation = useMutation({
-    mutationFn: () => followUser(user?.id ?? ''),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKey })
-    },
-    onError: (err) => {
-      toast.error(`Failed to follow: ${err.message}`)
-    },
-  })
+  // Direct follow/unfollow without using React Query mutations
+  const handleFollowToggle = async () => {
+    if (!user?.id) {
+      toast.error('User profile not loaded properly.')
+      return
+    }
 
-  const unfollowMutation = useMutation({
-    mutationFn: () => unfollowUser(user?.id ?? ''),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKey })
-    },
-    onError: (err) => {
-      toast.error(`Failed to unfollow: ${err.message}`)
-    },
-  })
-
-  const handleFollowToggle = () => {
-    if (!user?.id) return
     if (!loggedInUserId) {
       toast.error('Please sign in to follow users.')
       return
     }
-    if (user.isFollowing) {
-      unfollowMutation.mutate()
-    } else {
-      followMutation.mutate()
+
+    if (followLoading) return
+
+    // Optimistically update UI
+    setFollowLoading(true)
+    const currentlyFollowing = isFollowing ?? user.isFollowing ?? false
+    setIsFollowing(!currentlyFollowing)
+
+    try {
+      if (currentlyFollowing) {
+        // Unfollow user
+        await unfollowUser(user.id)
+        toast.success('User unfollowed successfully')
+      } else {
+        // Follow user
+        await followUser(user.id)
+        toast.success('User followed successfully')
+      }
+
+      // Simplified query invalidation - only invalidate the current profile
+      queryClient.invalidateQueries({
+        queryKey: queryKey,
+      })
+    } catch (err) {
+      // Revert UI on error
+      setIsFollowing(currentlyFollowing)
+      toast.error(
+        `Failed to ${currentlyFollowing ? 'unfollow' : 'follow'}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      )
+    } finally {
+      setFollowLoading(false)
     }
   }
 
@@ -315,106 +342,122 @@ export default function UserProfilePage({ params }: UserProfilePageProps) {
   }
 
   return (
-    <div className="container mx-auto max-w-4xl px-4 py-6">
-      {/* Profile Header */}
-      <div className="flex flex-col items-center text-center mb-8">
-        <Avatar className="h-20 w-20 mb-4">
+    <div className="container mx-auto max-w-4xl px-4 py-8">
+      {/* Profile Header - Modern & Minimalist Design */}
+      <div className="flex flex-col items-center mb-10">
+        {/* Avatar */}
+        <Avatar className="h-28 w-28 rounded-full mb-6">
           <AvatarImage
             src={user.image ?? undefined}
             alt={user.name || user.username}
+            className="rounded-full object-cover"
           />
-          <AvatarFallback className="text-xl">
+          <AvatarFallback className="text-2xl font-medium bg-primary/10 rounded-full">
             {getInitials(user.name || user.username)}
           </AvatarFallback>
         </Avatar>
 
-        <h1 className="text-2xl font-bold mb-1">
-          {user.name || user.username}
-        </h1>
+        {/* User info - centered for simplicity */}
+        <h1 className="text-2xl font-bold">{user.name || user.username}</h1>
 
-        <p className="text-sm text-muted-foreground mb-2">
-          {user.username && `ID: ${user.username}`}
+        <p className="text-muted-foreground mt-1 mb-4">
+          {user.username && `@${user.username}`}
         </p>
 
-        {user.bio && <p className="text-sm mb-4 max-w-md">{user.bio}</p>}
+        {/* Bio with max width for readability */}
+        {user.bio && (
+          <p className="text-sm text-center max-w-md mb-6">{user.bio}</p>
+        )}
 
-        <div className="flex space-x-6 text-sm mb-4">
-          <div className="flex flex-col">
-            <span className="font-medium">{user.followingCount ?? 0}</span>
-            <span className="text-muted-foreground text-xs">Following</span>
-          </div>
-
-          <div className="flex flex-col">
-            <span className="font-medium">{user.followerCount ?? 0}</span>
-            <span className="text-muted-foreground text-xs">Followers</span>
-          </div>
-
-          <div className="flex flex-col">
-            <span className="font-medium">{(user.followerCount ?? 0) * 2}</span>
-            <span className="text-muted-foreground text-xs">Likes</span>
-          </div>
-        </div>
-
+        {/* Follow Button - Prominent and simple */}
         {!isOwnProfile && (
           <Button
-            variant={user.isFollowing ? 'outline' : 'default'}
-            size="sm"
+            variant={
+              (isFollowing !== null ? isFollowing : user?.isFollowing)
+                ? 'outline'
+                : 'default'
+            }
             onClick={handleFollowToggle}
-            disabled={followMutation.isPending || unfollowMutation.isPending}
-            className="min-w-24"
+            disabled={followLoading}
+            className="rounded-full min-w-[120px] h-10 mb-6 transition-all"
           >
-            {user.isFollowing ? (
+            {followLoading ? (
               <>
-                <UserCheck className="mr-2 h-4 w-4" /> Following
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <span>{isFollowing ? 'Unfollowing' : 'Following'}</span>
               </>
             ) : (
-              <>
-                <UserPlus className="mr-2 h-4 w-4" /> Follow
-              </>
+              <span>
+                {(isFollowing !== null ? isFollowing : user?.isFollowing)
+                  ? 'Following'
+                  : 'Follow'}
+              </span>
             )}
           </Button>
         )}
+
+        {/* Stats - Flat and horizontal with clear separation */}
+        <div className="flex gap-12 items-center justify-center mt-1">
+          <div className="flex flex-col items-center">
+            <span className="text-lg font-semibold">
+              {user.followingCount ?? 0}
+            </span>
+            <span className="text-xs text-muted-foreground">Following</span>
+          </div>
+
+          <div className="flex flex-col items-center">
+            <span className="text-lg font-semibold">
+              {user.followerCount ?? 0}
+            </span>
+            <span className="text-xs text-muted-foreground">Followers</span>
+          </div>
+
+          <div className="flex flex-col items-center">
+            <span className="text-lg font-semibold">
+              {(user.followerCount ?? 0) * 2}
+            </span>
+            <span className="text-xs text-muted-foreground">Likes</span>
+          </div>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="mb-6">
-        <div className="flex space-x-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('posts')}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              activeTab === 'posts'
-                ? 'bg-primary/10 text-primary'
-                : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Posts
-          </button>
+      {/* Tabs - Simplified and unobtrusive */}
+      <div className="flex justify-center mb-8">
+        <button
+          type="button"
+          onClick={() => setActiveTab('posts')}
+          className={`px-6 py-2 mx-1 rounded-full text-sm font-medium transition-colors ${
+            activeTab === 'posts'
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-muted/30'
+          }`}
+        >
+          Posts
+        </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('saved')}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              activeTab === 'saved'
-                ? 'bg-primary/10 text-primary'
-                : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Bookmarks
-          </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('saved')}
+          className={`px-6 py-2 mx-1 rounded-full text-sm font-medium transition-colors ${
+            activeTab === 'saved'
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-muted/30'
+          }`}
+        >
+          Bookmarks
+        </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('likes')}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              activeTab === 'likes'
-                ? 'bg-primary/10 text-primary'
-                : 'hover:bg-muted/50 text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Likes
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveTab('likes')}
+          className={`px-6 py-2 mx-1 rounded-full text-sm font-medium transition-colors ${
+            activeTab === 'likes'
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-muted/30'
+          }`}
+        >
+          Likes
+        </button>
       </div>
 
       {/* Content */}

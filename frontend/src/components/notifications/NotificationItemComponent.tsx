@@ -71,11 +71,11 @@ export function NotificationItemComponent({
   const getNotificationText = (n: NotificationItem): React.ReactNode => {
     const actorLink = n.actor ? (
       <Link
-        href={`/u/${n.actor.username}`}
+        href={n.actor.username ? `/u/${n.actor.username}` : `/u/${n.actor.id}`}
         className="font-semibold hover:underline"
         onClick={(e) => e.stopPropagation()} // Prevent card click when clicking link
       >
-        {n.actor.name || n.actor.username}
+        {n.actor.name || n.actor.id}
       </Link>
     ) : (
       'Someone'
@@ -134,24 +134,45 @@ export function NotificationItemComponent({
     if (!notification.isRead) {
       markAsReadMutation.mutate(notification.id)
     }
+
+    // Navigate based on notification type with improved null checks
     if (notification.type === 'follow' && notification.actor) {
-      router.push(`/u/${notification.actor.username}`)
+      if (notification.actor.username) {
+        router.push(`/u/${notification.actor.username}`)
+      } else if (notification.actor.id) {
+        // Use actor ID if username is null
+        router.push(`/u/${notification.actor.id}`)
+      } else {
+        toast.error('Invalid user information')
+      }
     } else if (notification.postId) {
       router.push(`/posts/${notification.postId}`)
+    } else if (notification.actor) {
+      // Fallback to actor profile
+      if (notification.actor.username) {
+        router.push(`/u/${notification.actor.username}`)
+      } else if (notification.actor.id) {
+        router.push(`/u/${notification.actor.id}`)
+      } else {
+        toast.error('Invalid user information')
+      }
+    } else {
+      // If no valid destination, show error and stay on current page
+      console.error('Invalid notification destination:', notification)
+      toast.error('Unable to open this notification')
     }
   }
 
   return (
-    <div
-      className={`flex items-start space-x-3 p-4 border-b last:border-b-0 hover:bg-muted/50 cursor-pointer ${!notification.isRead ? 'bg-primary/5 font-medium' : 'text-muted-foreground'}`}
+    <button
+      type="button"
+      className={`w-full text-left flex items-start space-x-3 p-4 border-b last:border-b-0 hover:bg-muted/50 ${!notification.isRead ? 'bg-primary/5 font-medium' : 'text-muted-foreground'}`}
       onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           handleClick()
         }
       }}
-      role="button"
-      tabIndex={0}
       aria-label={`Notification from ${notification.actor?.name || 'Someone'}: ${notification.type}`}
     >
       <Avatar className="h-9 w-9 mt-0.5 flex-shrink-0">
@@ -175,6 +196,6 @@ export function NotificationItemComponent({
           aria-label="Unread notification"
         />
       )}
-    </div>
+    </button>
   )
 }

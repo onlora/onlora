@@ -16,6 +16,7 @@ import {
 } from '../db/schema' // IMPORT posts and visibilityEnum
 import {
   type AuthenticatedContextEnv,
+  optionalAuthMiddleware,
   requireAuthMiddleware,
 } from '../middleware/auth'
 
@@ -472,6 +473,7 @@ userRoutes.get(
 // GET /api/users/:profileUserId/profile - Fetch user profile and their public posts
 userRoutes.get(
   '/:profileUserId/profile',
+  optionalAuthMiddleware,
   zValidator('param', profileUserIdParamSchema, (result, c) => {
     if (!result.success) {
       throw new HTTPException(400, {
@@ -602,6 +604,7 @@ userRoutes.get(
 // GET /api/users/by-username/:username/profile - Fetch user profile and posts by username
 userRoutes.get(
   '/by-username/:username/profile',
+  optionalAuthMiddleware,
   zValidator('param', usernameParamSchema, (result, c) => {
     if (!result.success) {
       throw new HTTPException(400, {
@@ -1131,7 +1134,7 @@ userRoutes.get(
 
 // Zod schema for VE transaction response item (adjust fields as needed)
 const VeTransactionItemSchema = z.object({
-  id: z.number(),
+  id: z.string().uuid(),
   userId: z.string(),
   delta: z.number().int(),
   reason: z.string().nullable(),
