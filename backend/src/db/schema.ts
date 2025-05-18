@@ -12,6 +12,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core'
 import { users } from './auth-schema'
+import { lensAccounts, lensPosts } from './lens-schema'
 
 // Re-export users so it can be imported from this module by other files
 export { users }
@@ -112,6 +113,7 @@ export const postsRelations = relations(posts, ({ one, many }) => ({
   comments: many(comments),
   postImages: many(postImages),
   bookmarks: many(bookmarks),
+  lensPosts: many(lensPosts),
 }))
 
 export const likes = pgTable(
@@ -209,6 +211,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   followers: many(follows, {
     relationName: 'userFollowers',
   }),
+  lensAccounts: many(lensAccounts),
 }))
 
 export const jamsRelations = relations(jams, ({ one, many }) => ({

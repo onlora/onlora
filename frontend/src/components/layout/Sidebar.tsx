@@ -1,14 +1,13 @@
 'use client'
 
+import { SignInButton } from '@/components/auth/SignInButton'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
-import { authClient, useSession } from '@/lib/authClient'
+import { useSession } from '@/lib/authClient'
+import { signOutWithLens } from '@/lib/authClient'
 import { getInitials } from '@/lib/utils'
 import {
   Bell,
   Bookmark,
-  ChevronDown,
-  ChevronUp,
   Coins,
   Home,
   LayoutGrid,
@@ -68,22 +67,11 @@ export default function Sidebar() {
     return false
   }
 
-  // Handle Google sign in
-  const handleGoogleSignIn = async () => {
-    try {
-      await authClient.signIn.social({
-        provider: 'google',
-        callbackURL: 'http://localhost:3000',
-      })
-    } catch (error) {
-      console.error('Google Sign-In failed:', error)
-    }
-  }
-
   // Handle sign out
   const handleSignOut = async () => {
     try {
-      await authClient.signOut()
+      await signOutWithLens()
+
       setIsProfileMenuOpen(false)
     } catch (error) {
       console.error('Sign Out failed:', error)
@@ -160,13 +148,9 @@ export default function Sidebar() {
 
       {/* Sign in button for non-logged in users */}
       {!isLoggedIn && (
-        <Button
-          type="button"
-          onClick={handleGoogleSignIn}
-          className="w-full mt-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-xl h-11"
-        >
-          Sign in to Create
-        </Button>
+        <div className="mt-2">
+          <SignInButton />
+        </div>
       )}
     </>
   )
@@ -177,7 +161,7 @@ export default function Sidebar() {
       <div className="mt-4">
         <button
           type="button"
-          className="w-full px-4 py-3 rounded-xl hover:bg-muted/80 active:bg-muted cursor-pointer text-left flex items-center justify-between transition-all"
+          className="w-full px-4 py-3 rounded-xl hover:bg-muted/80 active:bg-muted cursor-pointer text-left flex items-center transition-all"
           onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
           aria-expanded={isProfileMenuOpen}
           aria-haspopup="true"
@@ -186,25 +170,14 @@ export default function Sidebar() {
             <Avatar className="h-10 w-10">
               <AvatarImage
                 src={user.image ?? undefined}
-                alt={user.name ?? user.email ?? 'User'}
+                alt={user.name ?? 'User'}
               />
               <AvatarFallback>{getInitials(user.name)}</AvatarFallback>
             </Avatar>
-            <div className="flex flex-col">
-              <span className="text-sm font-medium">{user.name}</span>
-              <span className="text-xs text-muted-foreground">
-                {user.email}
-              </span>
-            </div>
+            <span className="text-sm font-medium">{user.name}</span>
           </div>
-          {isProfileMenuOpen ? (
-            <ChevronUp className="h-5 w-5 text-muted-foreground" />
-          ) : (
-            <ChevronDown className="h-5 w-5 text-muted-foreground" />
-          )}
         </button>
 
-        {/* Profile dropdown menu */}
         {isProfileMenuOpen && (
           <div className="mt-2 py-2 px-1 bg-muted/30 rounded-xl">
             {profileItems.map((item) => (

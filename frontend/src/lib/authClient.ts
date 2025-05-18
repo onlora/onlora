@@ -1,24 +1,74 @@
 import { createAuthClient } from 'better-auth/react'
+import type { WalletClient } from 'viem'
+import {
+  authenticateWithLensToken,
+  loginToLensAndGetIdToken,
+} from './auth/lens-auth'
+import { lensClient } from './lens-client'
 
-// The baseURL should be the base URL of your backend server where the
-// /api/auth/* routes are hosted.
-const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
-
+// Create the auth client
 export const authClient = createAuthClient({
-  // If your auth routes are at http://localhost:8080/api/auth/*,
-  // and your NEXT_PUBLIC_API_URL is http://localhost:8080/api,
-  // then the baseURL for better-auth client should point to the root of the backend server,
-  // as it will append its own /api/auth path or use what's configured server-side.
-  // However, the better-auth docs examples often show baseURL: "http://localhost:3000"
-  // if the auth server is on the same domain as the app, implying it constructs paths correctly.
-  // Let's assume the /api/auth path is relative to the API_BASE_URL.
-  // If API_BASE_URL is 'http://localhost:8080/api', then auth routes are at '/auth' relative to that.
-  // Or, more simply, if better-auth server side is at /api/auth/*, and our frontend calls backend at /api/
-  // we need to ensure the client hits the correct base for its /api/auth calls.
-  // The better-auth examples use `baseURL: "http://localhost:3000"` when client and server are on the same domain.
-  // If client is on 3000 and API (including /api/auth/*) is on 8080, then baseURL should be http://localhost:8080
-  baseURL: backendUrl.replace('/api', ''), // Assuming NEXT_PUBLIC_API_URL might be http://host/api
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080',
 })
+// Export client and hooks
+export const { useSession } = authClient
 
-// Optionally, re-export commonly used methods/hooks for easier import elsewhere
-export const { signIn, signUp, signOut, useSession, getSession } = authClient
+/**
+ * Sign in with Lens
+ *
+ * This function handles the complete Lens authentication flow
+ */
+export async function signInWithLens(
+  walletClient: WalletClient,
+  lensAccountAddress: string,
+) {
+  try {
+    // Get Lens ID token
+    const idToken = await loginToLensAndGetIdToken(
+      walletClient,
+      lensAccountAddress,
+    )
+
+    // Authenticate with backend
+    const authResult = await authenticateWithLensToken(idToken)
+    return { data: authResult, error: null }
+  } catch (error) {
+    console.error('Failed to sign in with Lens:', error)
+    return {
+      data: null,
+      error:
+        error instanceof Error ? error.message : 'Failed to sign in with Lens',
+    }
+  }
+}
+
+/**
+ * Sign out from both better-auth and Lens
+ */
+export async function signOutWithLens() {
+  try {
+    // 1. Try to resume Lens session and logout properly
+    try {
+      const resumedSession = await lensClient.resumeSession()
+      if (resumedSession.isOk()) {
+        // If we have a valid session, logout properly
+        const sessionClient = resumedSession.value
+        await sessionClient.logout()
+        console.log('Successfully logged out from Lens')
+      }
+    } catch (lensError) {
+      console.warn('Failed to properly logout from Lens:', lensError)
+    }
+
+    // 2. Use better-auth to sign out
+    await authClient.signOut()
+
+    return { success: true, error: null }
+  } catch (error) {
+    console.error('Failed to sign out:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to sign out',
+    }
+  }
+}

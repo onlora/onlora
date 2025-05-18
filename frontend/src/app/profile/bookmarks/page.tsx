@@ -1,7 +1,7 @@
 'use client'
 
+import { SignInButton } from '@/components/auth/SignInButton'
 import FeedPostCard from '@/components/feed/FeedPostCard'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { FeedPost } from '@/lib/api/feedApi'
@@ -11,12 +11,26 @@ import {
 } from '@/lib/api/userApi'
 import { useSession } from '@/lib/authClient'
 import { type InfiniteData, useInfiniteQuery } from '@tanstack/react-query'
-import { Info, Loader2, ServerCrash } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Info, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo } from 'react'
 
 const BOOKMARKS_PAGE_SIZE = 12
+
+const SkeletonCard = () => (
+  <div className="bg-background rounded-lg overflow-hidden border border-border/50">
+    <div className="p-4 space-y-4">
+      <div className="flex items-center space-x-3">
+        <Skeleton className="h-8 w-8 rounded-full" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <Skeleton className="aspect-video w-full rounded-md" />
+      <Skeleton className="h-4 w-3/4" />
+    </div>
+  </div>
+)
 
 export default function BookmarksPage() {
   const { data: session, isPending: isAuthLoading } = useSession()
@@ -29,7 +43,7 @@ export default function BookmarksPage() {
 
   useEffect(() => {
     if (!isAuthLoading && !isAuthenticated) {
-      router.push('/api/auth/signin/google?callbackUrl=/profile/bookmarks')
+      router.push('/')
     }
   }, [isAuthenticated, isAuthLoading, router])
 
@@ -40,7 +54,6 @@ export default function BookmarksPage() {
     isFetchingNextPage,
     isLoading,
     isError,
-    error,
   } = useInfiniteQuery<
     BookmarkedPostsResponse,
     Error,
@@ -70,65 +83,22 @@ export default function BookmarksPage() {
 
   if (isAuthLoading) {
     return (
-      <div className="p-4 md:p-6">
-        <h1 className="text-2xl font-semibold mb-4">My Bookmarks</h1>
-        <div className="flex justify-center items-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="ml-2 text-muted-foreground">
-            Checking authentication...
-          </p>
-        </div>
+      <div className="flex-1 flex items-center justify-center min-h-[200px]">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     )
   }
 
   if (!isAuthenticated) {
-    return null
-  }
-
-  if (isLoading) {
     return (
-      <div className="p-4 md:p-6">
-        <h1 className="text-2xl font-semibold mb-4">My Bookmarks</h1>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          {[...Array(BOOKMARKS_PAGE_SIZE)].map((_, i) => (
-            <div
-              key={`skel-bookmark-${i}-${Math.random().toString(36).substr(2, 9)}`}
-              className="border rounded-lg overflow-hidden shadow-sm"
-            >
-              <div className="p-4 sm:p-5 space-y-3">
-                <div className="flex items-center space-x-3">
-                  <Skeleton className="h-10 w-10 rounded-full" />
-                  <div className="space-y-1">
-                    <Skeleton className="h-4 w-24" />
-                    <Skeleton className="h-3 w-16" />
-                  </div>
-                </div>
-                <Skeleton className="aspect-video w-full rounded-md" />
-                <Skeleton className="h-5 w-3/4" />
-                <Skeleton className="h-4 w-1/2" />
-              </div>
-              <div className="px-4 sm:px-5 pb-4">
-                <Skeleton className="h-4 w-20" />
-              </div>
-            </div>
-          ))}
+      <div className="flex-1 flex items-center justify-center min-h-[calc(100vh-200px)]">
+        <div className="w-full max-w-md text-center">
+          <h1 className="text-2xl font-bold mb-4">Sign In Required</h1>
+          <p className="text-muted-foreground mb-6">
+            Please sign in to view your bookmarks
+          </p>
+          <SignInButton />
         </div>
-      </div>
-    )
-  }
-
-  if (isError) {
-    const errorMessage =
-      error instanceof Error ? error.message : 'An unknown error occurred'
-    return (
-      <div className="p-4 md:p-6">
-        <h1 className="text-2xl font-semibold mb-4">My Bookmarks</h1>
-        <Alert variant="destructive">
-          <ServerCrash className="h-4 w-4" />
-          <AlertTitle>Error Loading Bookmarks</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
-        </Alert>
       </div>
     )
   }
@@ -136,70 +106,111 @@ export default function BookmarksPage() {
   const allBookmarkedPosts =
     data?.pages.flatMap((page) => page.data ?? []) ?? []
 
-  return (
-    <div className="p-4 md:p-6">
-      <h1 className="text-2xl font-semibold mb-6">My Bookmarks</h1>
-
-      {allBookmarkedPosts.length === 0 && (
-        <Alert>
-          <Info className="h-4 w-4" />
-          <AlertTitle>No Bookmarks Found</AlertTitle>
-          <AlertDescription>
-            You haven't bookmarked any posts yet. Explore the feed and save your
-            favorites!
-            <Button variant="link" className="p-0 h-auto ml-1" asChild>
-              <Link href="/feed">Go to Feed</Link>
-            </Button>
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {allBookmarkedPosts.length > 0 && (
-        <div className="feed-grid">
-          {allBookmarkedPosts.map((bookmarkItem) => {
-            const postForCard: FeedPost = {
-              id: bookmarkItem.id,
-              title: bookmarkItem.title,
-              coverImg: bookmarkItem.coverImg,
-              createdAt: bookmarkItem.createdAt,
-              author: bookmarkItem.author
-                ? {
-                    id: bookmarkItem.author.id,
-                    name: bookmarkItem.author.name,
-                    image: bookmarkItem.author.image,
-                    username: bookmarkItem.author.username ?? undefined,
-                  }
-                : null,
-              likeCount: bookmarkItem.likeCount,
-              commentCount: bookmarkItem.commentCount,
-              viewCount: bookmarkItem.viewCount,
-              remixCount: bookmarkItem.remixCount,
-              score: undefined,
-            }
-            return (
-              <div key={`bookmark-${bookmarkItem.id}`} className="w-full">
-                <FeedPostCard post={postForCard} />
-              </div>
-            )
-          })}
+  if (isLoading) {
+    return (
+      <div className="flex-1">
+        <h1 className="text-2xl font-medium px-6 mb-8">Bookmarks</h1>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 px-6">
+          {Array.from({ length: BOOKMARKS_PAGE_SIZE }).map((_, i) => (
+            <motion.div
+              key={`skeleton-${Math.random()}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.2, delay: i * 0.05 }}
+            >
+              <SkeletonCard />
+            </motion.div>
+          ))}
         </div>
-      )}
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex-1">
+        <h1 className="text-2xl font-medium px-6 mb-8">Bookmarks</h1>
+        <div className="flex flex-col items-center justify-center px-6 py-12">
+          <Info className="h-12 w-12 text-muted-foreground mb-4" />
+          <p className="text-muted-foreground">Failed to load bookmarks</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (allBookmarkedPosts.length === 0) {
+    return (
+      <div className="flex-1">
+        <h1 className="text-2xl font-medium px-6 mb-8">Bookmarks</h1>
+        <div className="flex flex-col items-center justify-center px-6">
+          <div className="max-w-md w-full bg-card/40 rounded-lg px-6 py-8 text-center">
+            <h2 className="text-lg font-medium mb-2">No Bookmarks Yet</h2>
+            <p className="text-muted-foreground mb-6">
+              You haven't bookmarked any posts yet. Explore and save your
+              favorites!
+            </p>
+            <Button asChild variant="outline">
+              <Link href="/">Explore Posts</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex-1">
+      <h1 className="text-2xl font-medium px-6 mb-8">Bookmarks</h1>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 px-6">
+        {allBookmarkedPosts.map((bookmarkItem) => {
+          const postForCard: FeedPost = {
+            id: bookmarkItem.id,
+            title: bookmarkItem.title,
+            coverImg: bookmarkItem.coverImg,
+            createdAt: bookmarkItem.createdAt,
+            author: bookmarkItem.author
+              ? {
+                  id: bookmarkItem.author.id,
+                  name: bookmarkItem.author.name,
+                  image: bookmarkItem.author.image,
+                  username: bookmarkItem.author.username ?? undefined,
+                }
+              : null,
+            likeCount: bookmarkItem.likeCount,
+            commentCount: bookmarkItem.commentCount,
+            viewCount: bookmarkItem.viewCount,
+            remixCount: bookmarkItem.remixCount,
+            score: undefined,
+          }
+          return (
+            <motion.div
+              key={bookmarkItem.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <FeedPostCard post={postForCard} />
+            </motion.div>
+          )
+        })}
+      </div>
 
       {hasNextPage && (
-        <div className="text-center mt-8">
+        <div className="flex justify-center mt-8 pb-8">
           <Button
             onClick={() => fetchNextPage()}
             disabled={isFetchingNextPage}
             variant="outline"
-            size="lg"
+            className="min-w-[120px]"
           >
             {isFetchingNextPage ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading more...
+                Loading
               </>
             ) : (
-              'Load More Bookmarks'
+              'Load More'
             )}
           </Button>
         </div>

@@ -5,6 +5,7 @@ import pg from 'pg'
 // For now, let's try to get it directly from process.env as per other env vars
 
 import * as authSchema from './auth-schema' // Tables for better-auth
+import * as lensSchema from './lens-schema' // ADDED: Import Lens schema
 // Import all schemas for the Drizzle instance
 import * as appSchema from './schema' // Your application-specific tables
 
@@ -23,7 +24,7 @@ export const pool = new Pool({
 })
 
 // Combine all schemas for the Drizzle instance
-const combinedSchema = { ...appSchema, ...authSchema }
+const combinedSchema = { ...appSchema, ...authSchema, ...lensSchema }
 
 // Create a Drizzle ORM instance with the combined schema
 export const db = drizzle(pool, {

@@ -1,11 +1,15 @@
 import type { Config } from 'drizzle-kit'
 
 export default {
-  schema: ['./src/db/schema.ts', './src/db/auth-schema.ts'], // Explicitly list both schema files
+  schema: [
+    './src/db/schema.ts',
+    './src/db/auth-schema.ts',
+    './src/db/lens-schema.ts',
+  ],
   out: './src/db/migrations',
-  dialect: 'postgresql', // Specify dialect as postgresql for pg driver
+  dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL || '', // Get a warning if not set, but allows drizzle-kit to run for generation
+    url: process.env.DATABASE_URL || '',
   },
   // verbose: true,
   strict: true,

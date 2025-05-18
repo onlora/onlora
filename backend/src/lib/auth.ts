@@ -8,7 +8,9 @@ import {
   users as usersAuthTable,
   verifications as verificationsTable,
 } from '../db/auth-schema'
+import { lensAccounts } from '../db/lens-schema'
 import { veTxns } from '../db/schema'
+import { siwl } from './better-auth/plugins/siwl'
 
 if (!config.googleClientId) {
   throw new Error('Missing GOOGLE_CLIENT_ID environment variable')
@@ -26,6 +28,7 @@ export const auth = betterAuth({
       account: accountsAuthTable,
       session: sessionsAuthTable,
       verification: verificationsTable,
+      lensAccounts: lensAccounts,
     },
   }),
   socialProviders: {
@@ -33,8 +36,13 @@ export const auth = betterAuth({
       clientId: config.googleClientId,
       clientSecret: config.googleClientSecret,
     },
-    // emailAndPassword: { enabled: true }, // If we want email/password later
   },
+  plugins: [
+    siwl({
+      // useTestnet: process.env.NODE_ENV === 'development',
+      // appId: config.lensAppId,
+    }),
+  ],
   trustedOrigins: ['http://localhost:3000', 'https://api.onlora.ai'],
   databaseHooks: {
     user: {
@@ -82,20 +90,4 @@ export const auth = betterAuth({
       path: '/',
     },
   },
-
-  // Example of database hooks if needed later for custom logic on user creation:
-  // databaseHooks: {
-  //   user: {
-  //     create: {
-  //       after: async (user, ctx) => {
-  //         // - Update user.vibe_energy (initial value is set by DB default)
-  //         // - Create ve_txns entry for signup
-  //         // This requires access to `db` (Drizzle instance) here
-  //         // console.log('New user created by better-auth:', user);
-  //         // await db.update(schema.users).set({ vibe_energy: 50 }).where(eq(schema.users.id, user.id));
-  //         // await db.insert(schema.veTxns).values({ userId: user.id, delta: 50, reason: 'signup' });
-  //       },
-  //     },
-  //   },
-  // },
 })

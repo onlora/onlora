@@ -1,8 +1,8 @@
 'use client'
 
+import { SignInButton } from '@/components/auth/SignInButton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   type VeTransactionItem,
@@ -35,22 +35,21 @@ function formatReason(reason: string | null, refId: string | null): string {
     .join(' ')
 }
 
-export default function VeHistoryPageContent() {
-  const { data: session, isPending: isAuthLoading } = useSession()
+export default function VEHistoryPage() {
+  const { data: session, isPending } = useSession()
   const router = useRouter()
 
   const isAuthenticated = useMemo(() => {
-    if (isAuthLoading) return false
+    if (isPending) return false
     return !!session?.user
-  }, [isAuthLoading, session])
+  }, [isPending, session])
 
   useEffect(() => {
-    if (!isAuthLoading && !isAuthenticated) {
-      router.push('/api/auth/signin/google?callbackUrl=/profile/ve-history')
+    if (!isPending && !isAuthenticated) {
+      router.push('/')
     }
-  }, [isAuthenticated, isAuthLoading, router])
+  }, [isAuthenticated, isPending, router])
 
-  // Fetch user profile to get vibeEnergy
   const {
     data: profileData,
     isLoading: isProfileLoading,
@@ -59,7 +58,7 @@ export default function VeHistoryPageContent() {
     queryKey: ['myProfile'],
     queryFn: () => getMyProfile(),
     enabled: isAuthenticated,
-    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
+    staleTime: 1000 * 60 * 2,
   })
 
   const {
@@ -85,48 +84,43 @@ export default function VeHistoryPageContent() {
       return hasNextPage ? nextOffset : undefined
     },
     enabled: isAuthenticated,
-    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
+    staleTime: 1000 * 60 * 2,
   })
 
   const isLoading = isHistoryLoading || isProfileLoading
   const isError = isHistoryError || isProfileError
   const veBalance = profileData?.user?.vibeEnergy ?? 0
 
-  if (isAuthLoading) {
+  if (!isPending && !isAuthenticated) {
     return (
-      <div className="p-4 md:p-8 max-w-2xl mx-auto">
-        <div className="flex justify-center items-center py-10">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          <p className="ml-2 text-muted-foreground">
-            Checking authentication...
+      <div className="container flex items-center justify-center min-h-[calc(100vh-200px)]">
+        <div className="w-full max-w-md">
+          <h1 className="text-2xl font-bold mb-4 text-center">
+            Sign In Required
+          </h1>
+          <p className="text-muted-foreground mb-4 text-center">
+            Please sign in to view your VE history
           </p>
+          <SignInButton />
         </div>
       </div>
     )
   }
 
-  if (!isAuthenticated) {
-    // router.push should have handled this, but as a fallback
-    return null
-  }
-
   if (isLoading) {
     return (
-      <div className="p-4 md:p-8 max-w-2xl mx-auto">
-        <div className="mb-8 flex items-center">
-          <h1 className="text-2xl font-medium mr-auto">Vibe Energy</h1>
-          <Skeleton className="h-10 w-20" />
+      <div className="max-w-2xl mx-auto p-6">
+        <div className="flex items-center justify-between mb-8 bg-card p-6 rounded-xl shadow-sm">
+          <Skeleton className="h-8 w-32" />
+          <Skeleton className="h-12 w-24" />
         </div>
-
-        <Separator className="mb-6" />
-
-        <div className="space-y-3 mb-8">
-          {Array.from({ length: 5 }).map(() => (
+        <div className="space-y-4">
+          {Array.from({ length: 5 }).map((_, i) => (
             <div
-              key={`skeleton-${Math.random().toString(36).substring(2, 9)}`}
-              className="flex justify-between items-center px-3 py-3 border-b"
+              key={i}
+              className="flex items-center justify-between p-4 bg-card/50 rounded-lg animate-pulse"
             >
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-3 w-20" />
               </div>
@@ -144,8 +138,7 @@ export default function VeHistoryPageContent() {
         ? historyError.message
         : 'An unknown error occurred'
     return (
-      <div className="p-4 md:p-8 max-w-2xl mx-auto">
-        <h1 className="text-2xl font-medium mb-6">Vibe Energy</h1>
+      <div className="max-w-2xl mx-auto p-6">
         <Alert variant="destructive">
           <ServerCrash className="h-4 w-4" />
           <AlertTitle>Error Loading VE History</AlertTitle>
@@ -158,25 +151,23 @@ export default function VeHistoryPageContent() {
   const allTransactions = data?.pages.flatMap((page) => page.items ?? []) ?? []
 
   return (
-    <div className="p-4 md:p-8 max-w-2xl mx-auto">
-      <div className="flex items-center mb-3">
-        <h1 className="text-2xl font-medium mr-auto">Vibe Energy</h1>
-
-        {/* Simple Lightning Energy Indicator */}
-        <div className="flex items-center space-x-2 px-3 py-2 bg-green-100 rounded-xl shadow-sm">
-          <Zap className="relative z-10 h-5 w-5 text-green-600 rounded-2xl" />
-          <span className="font-semibold text-green-700  tabular-nums">
+    <div className="max-w-2xl mx-auto p-6">
+      {/* VE Balance Card */}
+      <div className="flex items-center justify-between mb-8 bg-card p-6 rounded-xl shadow-sm">
+        <div>
+          <h1 className="text-2xl font-semibold mb-1">Vibe Energy</h1>
+          <p className="text-sm text-muted-foreground">Transaction History</p>
+        </div>
+        <div className="flex items-center gap-2 px-4 py-3 bg-green-100 dark:bg-green-900/30 rounded-xl">
+          <Zap className="h-5 w-5 text-green-600 dark:text-green-400" />
+          <span className="text-xl font-bold text-green-700 dark:text-green-400 tabular-nums">
             {veBalance}
           </span>
         </div>
       </div>
-      <p className="text-sm text-muted-foreground mb-6">
-        Track your Vibe Energy earnings and spending
-      </p>
 
-      <Separator className="mb-6" />
-
-      {allTransactions.length === 0 && (
+      {/* Transactions List */}
+      {allTransactions.length === 0 ? (
         <Alert>
           <Info className="h-4 w-4" />
           <AlertTitle>No Transactions Yet</AlertTitle>
@@ -185,75 +176,77 @@ export default function VeHistoryPageContent() {
             platform to earn VE!
           </AlertDescription>
         </Alert>
-      )}
-
-      {allTransactions.length > 0 && (
-        <div className="mb-8">
-          {allTransactions.map((tx: VeTransactionItem, index) => (
+      ) : (
+        <div className="space-y-3">
+          {allTransactions.map((tx: VeTransactionItem) => (
             <motion.div
               key={tx.id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}
-              className="flex items-center justify-between py-3 px-2 border-b last:border-0"
+              className="flex items-center justify-between p-4 bg-card/50 rounded-lg hover:bg-card/80 transition-colors"
             >
-              <div>
-                <div className="flex items-center">
-                  {tx.delta >= 0 ? (
-                    <div className="text-green-600 mr-1.5">
-                      <ArrowUp className="h-3.5 w-3.5" />
-                    </div>
-                  ) : (
-                    <div className="text-red-600 mr-1.5">
-                      <ArrowDown className="h-3.5 w-3.5" />
-                    </div>
+              <div className="flex items-start gap-3">
+                <div
+                  className={cn(
+                    'rounded-full p-2',
+                    tx.delta >= 0
+                      ? 'bg-green-100 dark:bg-green-900/30'
+                      : 'bg-red-100 dark:bg-red-900/30',
                   )}
-                  <span className="font-medium text-sm">
-                    {formatReason(tx.reason, tx.refId)}
-                  </span>
+                >
+                  {tx.delta >= 0 ? (
+                    <ArrowUp className="h-4 w-4 text-green-600 dark:text-green-400" />
+                  ) : (
+                    <ArrowDown className="h-4 w-4 text-red-600 dark:text-red-400" />
+                  )}
                 </div>
-                <span className="text-xs text-muted-foreground ml-5">
-                  {new Date(tx.createdAt).toLocaleDateString()} ·{' '}
-                  {new Date(tx.createdAt).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
+                <div>
+                  <p className="font-medium">
+                    {formatReason(tx.reason, tx.refId)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(tx.createdAt).toLocaleDateString()} ·{' '}
+                    {new Date(tx.createdAt).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </p>
+                </div>
               </div>
 
               <span
                 className={cn(
-                  'text-sm font-medium tabular-nums',
+                  'text-base font-semibold tabular-nums',
                   tx.delta >= 0
-                    ? 'text-green-600 dark:text-green-500'
-                    : 'text-red-600 dark:text-red-500',
+                    ? 'text-green-600 dark:text-green-400'
+                    : 'text-red-600 dark:text-red-400',
                 )}
               >
                 {tx.delta >= 0 ? `+${tx.delta}` : tx.delta}
               </span>
             </motion.div>
           ))}
-        </div>
-      )}
 
-      {hasNextPage && (
-        <div className="text-center">
-          <Button
-            onClick={() => fetchNextPage()}
-            disabled={isFetchingNextPage}
-            variant="outline"
-            size="sm"
-            className="rounded-lg"
-          >
-            {isFetchingNextPage ? (
-              <>
-                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                Loading
-              </>
-            ) : (
-              'Load More'
-            )}
-          </Button>
+          {hasNextPage && (
+            <div className="text-center pt-4">
+              <Button
+                onClick={() => fetchNextPage()}
+                disabled={isFetchingNextPage}
+                variant="outline"
+                className="w-full rounded-lg"
+              >
+                {isFetchingNextPage ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Loading more...
+                  </>
+                ) : (
+                  'Load More'
+                )}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
