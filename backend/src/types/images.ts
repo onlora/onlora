@@ -52,5 +52,6 @@ export interface MessageImageData {
   id: string // A unique ID for this image instance, e.g., timestamp or UUID
   url: string // URL or Base64 Data URI
   altText?: string
+  model?: string
   // Potentially other metadata: width, height, modelUsed etc.
 }

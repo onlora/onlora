@@ -301,6 +301,7 @@ jamApp.post(
             id: randomUUID(), // Generate a proper UUID for each image
             url: imageUrlToStore,
             altText: imageAltText,
+            model: validatedBody.modelId,
           }
         })
       }

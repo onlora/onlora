@@ -6,6 +6,7 @@ export interface PostImageData {
   id?: string
   data: string // base64 data or URL
   altText?: string
+  model?: string
 }
 
 export interface CreatePostPayload {

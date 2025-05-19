@@ -4,6 +4,7 @@ export const config = {
   logLevel: process.env.LOG_LEVEL || 'info',
   nodeEnv: process.env.NODE_ENV || 'development',
   databaseUrl: process.env.DATABASE_URL,
+  openaiBaseUrl: process.env.OPENAI_BASE_URL,
   openaiApiKey: process.env.OPENAI_API_KEY,
   googleGenerativeAiApiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   r2BucketName: process.env.R2_BUCKET_NAME,
@@ -23,11 +24,19 @@ if (!config.databaseUrl) {
   console.error('FATAL ERROR: DATABASE_URL is not defined.')
   process.exit(1)
 }
+
 if (!config.openaiApiKey) {
   console.warn(
     'Warning: OPENAI_API_KEY is not defined. OpenAI features may not work.',
   )
 }
+
+if (!config.openaiBaseUrl) {
+  console.warn(
+    'Warning: OPENAI_BASE_URL is not defined. OpenAI features may not work.',
+  )
+}
+
 if (!config.googleGenerativeAiApiKey) {
   console.warn(
     'Warning: GOOGLE_GENERATIVE_AI_API_KEY is not defined. Google AI features may not work.',

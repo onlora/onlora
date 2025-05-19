@@ -24,6 +24,7 @@ export interface MessageImage {
   altText?: string
   width?: number
   height?: number
+  model?: string
 }
 
 /**

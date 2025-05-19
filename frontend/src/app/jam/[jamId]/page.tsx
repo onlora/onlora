@@ -386,6 +386,7 @@ export default function JamPage() {
           id: img.id,
           data: img.url,
           altText: img.altText,
+          model: img.model,
         }),
       )
 
@@ -466,6 +467,7 @@ export default function JamPage() {
           id: img.id,
           data: img.url,
           altText: img.altText,
+          model: img.model,
         }),
       )
 

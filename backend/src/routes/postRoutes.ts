@@ -36,18 +36,12 @@ import {
   getCommentsByPostId,
 } from '../services/commentService' // Import from service
 
-// Constants
-const ONLORA_LENS_APP_ID = '0x46E8f06e085f68864Ef5616c9f5dEB514a7fd617'
-
-// UUID validation pattern
-const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 // Define type for image data
 interface ImageData {
   id?: string
   data: string // base64 data or URL
   altText?: string
+  model?: string
 }
 
 // Zod schema for post creation payload with direct image data
@@ -62,23 +56,18 @@ const createPostSchema = z.object({
         id: z.string().optional(), // Optional ID if exists
         data: z.string(), // base64 data or URL
         altText: z.string().optional(),
+        model: z.string().optional(),
       }),
     )
     .min(1, 'At least one image is required')
     .max(10),
-  jamId: z
-    .string()
-    .regex(uuidPattern, 'Jam ID must be a valid UUID')
-    .optional(), // Optional: to link post back to its origin jam
+  jamId: z.string().uuid('Jam ID must be a valid UUID').optional(), // Optional: to link post back to its origin jam
   // Remix-specific fields (optional)
   parentPostId: z
     .string()
-    .regex(uuidPattern, 'Parent Post ID must be a valid UUID')
+    .uuid('Parent Post ID must be a valid UUID')
     .optional(),
-  rootPostId: z
-    .string()
-    .regex(uuidPattern, 'Root Post ID must be a valid UUID')
-    .optional(),
+  rootPostId: z.string().uuid('Root Post ID must be a valid UUID').optional(),
   generation: z.number().int().nonnegative().optional(),
 })
 
@@ -88,7 +77,7 @@ type CreatePostValidatedData = z.infer<typeof createPostSchema>
 
 // Zod schema for postId param
 const postIdParamSchema = z.object({
-  postId: z.string().regex(uuidPattern, 'Post ID must be a valid UUID'),
+  postId: z.string().uuid('Post ID must be a valid UUID'),
 })
 
 // --- Zod schema for the response of the clone endpoint ---
@@ -97,12 +86,8 @@ const postCloneDataSchema = z.object({
   tags: z.array(z.string()).optional(),
   coverImgUrl: z.string().url().optional(),
   // imageIds: z.array(z.string().regex(uuidPattern)).optional(), // If we decide to clone image associations by ID
-  parentPostId: z
-    .string()
-    .regex(uuidPattern, 'Parent Post ID must be a valid UUID'),
-  rootPostId: z
-    .string()
-    .regex(uuidPattern, 'Root Post ID must be a valid UUID'),
+  parentPostId: z.string().uuid('Parent Post ID must be a valid UUID'),
+  rootPostId: z.string().uuid('Root Post ID must be a valid UUID'),
   generation: z.number().int().nonnegative(),
   // Potentially a snippet of bodyMd if desired
 })
@@ -235,7 +220,7 @@ interface CommentWithUser {
 // Process image data and upload to R2 if needed
 async function processImage(
   imageData: ImageData,
-): Promise<{ id: string; url: string } | null> {
+): Promise<{ id: string; url: string; model?: string } | null> {
   try {
     // Generate random ID if not provided
     const imageId = imageData.id || randomUUID()
@@ -244,7 +229,7 @@ async function processImage(
     if (imageData.id) {
       const existingImage = await db.query.images.findFirst({
         where: eq(images.id, imageId),
-        columns: { url: true },
+        columns: { url: true, model: true },
       })
 
       if (existingImage) {
@@ -254,6 +239,7 @@ async function processImage(
         return {
           id: imageId,
           url: existingImage.url,
+          model: existingImage.model === null ? undefined : existingImage.model,
         }
       }
     }
@@ -287,6 +273,7 @@ async function processImage(
       return {
         id: imageId,
         url: r2Result.publicUrl,
+        model: imageData.model === null ? undefined : imageData.model,
       }
     }
 
@@ -294,6 +281,7 @@ async function processImage(
     return {
       id: imageId,
       url: imageData.data,
+      model: imageData.model === null ? undefined : imageData.model,
     }
   } catch (error) {
     console.error('Error processing image:', error)
@@ -328,7 +316,11 @@ postRoutes.post(
       const payload = createPostSchema.parse(jsonPayload)
 
       // Process the provided images
-      const processedImages: Array<{ id: string; url: string }> = []
+      const processedImages: Array<{
+        id: string
+        url: string
+        model?: string
+      }> = []
       for (const imageData of payload.images) {
         const result = await processImage(imageData)
         if (result) {
@@ -365,8 +357,10 @@ postRoutes.post(
               jamId: payload.jamId,
               isPublic: payload.visibility === 'public',
               prompt:
-                payload.images.find((i) => i.id === img.id)?.altText ||
+                (payload.images.find((i) => i.id === img.id)?.altText ??
+                  undefined) ||
                 payload.title,
+              model: img.model === null ? undefined : img.model,
               createdAt: new Date(),
             })
             .onConflictDoNothing({ target: images.id })
@@ -1300,7 +1294,7 @@ postRoutes.get(
 
 // POST /api/posts/create-and-link-lens - Link a post to Lens Protocol
 const createAndLinkLensSchema = z.object({
-  postId: z.string().regex(uuidPattern, 'Post ID must be a valid UUID'),
+  postId: z.string().uuid('Post ID must be a valid UUID'),
   lensPostId: z.string().min(1, 'Lens Post ID is required'),
   lensContentUri: z.string().min(1, 'Lens Content URI is required'),
   lensTransactionHash: z.string().min(1, 'Lens Transaction Hash is required'),
@@ -1347,10 +1341,7 @@ postRoutes.post(
       console.log('payload.lensAccountId:', payload.lensAccountId)
       console.log('lensAccounts.address:', lensAccounts.address)
       const lensAccount = await db.query.lensAccounts.findFirst({
-        where: eq(
-          lensAccounts.address,
-          sql`LOWER(${payload.lensAccountId})::text = LOWER(lens_accounts.address)::text`,
-        ),
+        where: eq(lensAccounts.address, payload.lensAccountId),
         columns: { userId: true, id: true },
       })
 
@@ -1392,7 +1383,7 @@ postRoutes.post(
 
 // POST /api/posts/prepare-lens-metadata - Prepare metadata for Lens post
 const prepareLensMetadataSchema = z.object({
-  postId: z.string().regex(uuidPattern, 'Post ID must be a valid UUID'),
+  postId: z.string().uuid('Post ID must be a valid UUID'),
   title: z.string().min(1, 'Title is required'),
   description: z.string().optional(),
   images: z.array(

@@ -53,7 +53,6 @@ export const images = pgTable('images', {
     onDelete: 'cascade',
   }),
   url: text('url').notNull(),
-  r2Key: text('r2_key'), // Key for the object in R2 storage
   model: text('model'),
   prompt: text('prompt'), // The prompt used to generate the image
   // Optional: add width, height, format if needed from AI metadata

@@ -2,9 +2,10 @@ import { experimental_generateImage as generateImage } from 'ai'
 import { generateText } from 'ai'
 import pino from 'pino'
 
-import { google } from '@ai-sdk/google'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 // Import only required provider modules
-import { openai } from '@ai-sdk/openai'
+import { createOpenAI } from '@ai-sdk/openai'
+import { config } from '../config'
 
 import type {
   GenerateImageParams,
@@ -50,15 +51,24 @@ interface TextGenOptions {
 }
 
 class ImageGenerationService {
-  // Provider modules
-  private providers: Record<string, ProviderModule | LanguageProviderModule> = {
-    openai: openai,
-    google: google,
-  }
+  // Provider modules (initialized with apiKey/baseURL from config)
+  private providers: Record<string, ProviderModule | LanguageProviderModule>
 
   constructor() {
+    // Instantiate providers with apiKey/baseURL from config
+    const openaiProvider = createOpenAI({
+      apiKey: config.openaiApiKey,
+      baseURL: config.openaiBaseUrl,
+    })
+    const googleProvider = createGoogleGenerativeAI({
+      apiKey: config.googleGenerativeAiApiKey,
+    })
+    this.providers = {
+      openai: openaiProvider,
+      google: googleProvider,
+    }
     logger.info(
-      'Image generation service initialized with providers: openai, google',
+      'Image generation service initialized with providers: openai, google (with config)',
     )
   }
 
