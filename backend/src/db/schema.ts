@@ -396,3 +396,19 @@ export const commentLikesRelations = relations(commentLikes, ({ one }) => ({
     references: [users.id],
   }),
 }))
+
+// --- Vibe Energy Action Configurations Table ---
+export const veActionConfigs = pgTable('ve_action_configs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  actionType: text('action_type').notNull(), // e.g., 'generate', 'daily_check_in', 'post_create'
+  modelId: text('model_id'), // Identifier for the AI model, if applicable
+  cost: integer('cost').notNull().default(0), // VE cost for the action/model
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const veActionConfigsRelations = relations(veActionConfigs, () => ({}))

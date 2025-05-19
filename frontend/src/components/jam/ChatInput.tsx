@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/tooltip'
 import type { ApiError } from '@/lib/api/apiClient'
 import { getGenerationModels } from '@/lib/api/modelApi'
+import { getMyVeBalance } from '@/lib/api/userApi'
+import { getActionVeCost } from '@/lib/api/veApi'
 import { cn } from '@/lib/utils'
 import type { AIModelData, ImageSize } from '@/types/models'
 import { useQuery } from '@tanstack/react-query'
@@ -25,6 +27,7 @@ import {
   LayoutGrid,
   Loader2,
   SendHorizontal,
+  Wallet,
   Zap,
 } from 'lucide-react'
 import type React from 'react'
@@ -51,6 +54,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 }) => {
   const [inputValue, setInputValue] = useState('')
   const [currentModel, setCurrentModel] = useState<AIModelData | null>(null)
+  const [modelVeCosts, setModelVeCosts] = useState<Record<string, string>>({})
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -67,6 +71,59 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const modelsError = modelsErrorData
     ? (modelsErrorData as ApiError)?.message || modelsErrorData.message
     : null
+
+  // Fetch VE cost for the current model and 'generate' action
+  const {
+    data: veCostData,
+    isLoading: veCostLoading,
+    error: veCostErrorDataObj,
+    refetch: refetchVeCost, // To refetch when model changes if needed by other logic
+  } = useQuery({
+    queryKey: ['veCost', 'generate', currentModel?.value],
+    queryFn: () => {
+      if (!currentModel?.value) {
+        // This should ideally not be called if query is disabled correctly,
+        // but as a safeguard:
+        return Promise.resolve({ cost: -1, error: 'Model not selected' })
+      }
+      return getActionVeCost('generate', currentModel.value)
+    },
+    enabled: !!currentModel?.value, // Only run query if a model is selected
+    staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+    retry: false, // Don't retry on error for this, to avoid spamming if config is missing
+  })
+
+  const veCostApiError =
+    veCostErrorDataObj && 'message' in veCostErrorDataObj
+      ? (veCostErrorDataObj as ApiError)?.message || veCostErrorDataObj.message
+      : null
+
+  let veDisplay = 'Ready!'
+  if (veCostLoading) {
+    veDisplay = 'Loading...'
+  } else if (veCostData?.cost !== undefined && veCostData.cost >= 0) {
+    veDisplay = `${veCostData.cost} VE`
+  } else if (veCostApiError) {
+    veDisplay = 'VE Ready' // More positive error message
+    console.error('ChatInput VE Cost Error:', veCostApiError, veCostData?.error)
+  } else if (veCostData?.error) {
+    // Error message from the API response itself
+    veDisplay = 'VE Ready'
+    console.error('ChatInput VE Cost API Error:', veCostData.error)
+  } else if (!currentModel) {
+    veDisplay = 'Select Model' // No model selected
+  }
+
+  // 查询用户的VE余额
+  const {
+    data: veBalanceData,
+    isLoading: veBalanceLoading,
+    error: veBalanceError,
+  } = useQuery({
+    queryKey: ['veBalance'],
+    queryFn: getMyVeBalance,
+    staleTime: 60 * 1000, // 缓存1分钟
+  })
 
   useEffect(() => {
     if (modelsLoading || !availableModels) return
@@ -195,6 +252,33 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     }
   }, [inputValue])
 
+  useEffect(() => {
+    if (modelsLoading || !availableModels || availableModels.length === 0)
+      return
+
+    const fetchAllModelCosts = async () => {
+      const costsMap: Record<string, string> = {}
+
+      for (const model of availableModels) {
+        try {
+          const costData = await getActionVeCost('generate', model.value)
+          if (costData.cost !== undefined && costData.cost >= 0) {
+            costsMap[model.value] = `${costData.cost} VE`
+          } else {
+            costsMap[model.value] = 'VE'
+          }
+        } catch (err) {
+          console.error(`Error fetching VE cost for ${model.value}:`, err)
+          costsMap[model.value] = 'VE'
+        }
+      }
+
+      setModelVeCosts(costsMap)
+    }
+
+    fetchAllModelCosts()
+  }, [availableModels, modelsLoading])
+
   const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(event.target.value)
   }
@@ -314,28 +398,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   return (
     <div className="flex-shrink-0 z-10">
       <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
-        <div className="relative w-full rounded-xl bg-accent/20 shadow-sm">
+        <div className="relative w-full rounded-xl bg-accent/20 shadow-sm border border-accent/30">
           <div className="flex items-center px-4 py-2 border-b border-accent/10">
-            {/* VE indicator with tooltip */}
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center mr-3 cursor-help">
-                    <Zap className="h-4 w-4 text-amber-400 mr-1" />
-                    <span className="text-sm text-foreground/70">6 VE</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  <p>
-                    Vibe Energy: Used for image generation. Replenishes daily.
-                  </p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            <div className="mx-2 h-4 border-r border-accent/20" />
-
-            {/* Model selector */}
+            {/* Model selector with integrated VE indicator */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -344,32 +409,122 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                   className="h-8 gap-2 text-sm text-foreground/70 rounded-full hover:bg-accent/40"
                 >
                   <BrainCircuit className="h-3.5 w-3.5" />
-                  <span className="max-w-[160px] truncate">
+                  <span className="max-w-[120px] truncate">
                     {currentModel?.label || 'Select model'}
                   </span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-[300px]">
-                <DropdownMenuLabel>AI Model</DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={currentModel?.value || ''}
-                  onValueChange={handleModelChangeInternal}
-                >
+              <DropdownMenuContent align="start" className="w-[350px] p-2">
+                <div className="flex justify-between items-center px-3 py-2 mb-2">
+                  <h3 className="text-base font-medium">AI Model</h3>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center px-2 py-1 gap-1.5 bg-gradient-to-r from-emerald-500/10 to-green-500/10 border border-emerald-500/20 rounded-lg cursor-help">
+                          <Wallet className="h-3.5 w-3.5 text-emerald-500" />
+                          <span className="text-sm">
+                            {veBalanceLoading ? (
+                              <span className="text-muted-foreground">
+                                Loading...
+                              </span>
+                            ) : veBalanceError ? (
+                              <span className="text-muted-foreground">
+                                Error
+                              </span>
+                            ) : (
+                              <span>
+                                <span className="text-emerald-500/70 text-xs">
+                                  Available:
+                                </span>{' '}
+                                <span className="font-medium text-emerald-600">
+                                  {veBalanceData?.balance || 0}{' '}
+                                  <span className="text-green-500">VE</span>
+                                </span>
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p>
+                          <span className="font-medium">
+                            Your Vibe Energy Balance
+                          </span>{' '}
+                          - This is the amount of VE available to create images.
+                          Refreshes every 24 hours.
+                          {veBalanceError && (
+                            <span className="block text-destructive text-xs mt-1">
+                              Unable to load your current balance
+                            </span>
+                          )}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                <div className="space-y-1">
                   {availableModels.map((model) => (
-                    <DropdownMenuRadioItem
+                    <button
+                      type="button"
                       key={model.value}
-                      value={model.value}
+                      className={cn(
+                        'flex items-center justify-between w-full px-3 py-2.5 rounded-md transition-colors text-left',
+                        model.value === currentModel?.value
+                          ? 'bg-gradient-to-r from-emerald-500/5 to-green-500/5 border border-emerald-500/15'
+                          : 'hover:bg-accent/10 cursor-pointer',
+                      )}
+                      onClick={() => handleModelChangeInternal(model.value)}
                       disabled={modelsLoading}
+                      aria-pressed={model.value === currentModel?.value}
                     >
-                      <div className="flex flex-col items-start">
+                      <div className="flex flex-col">
                         <div className="font-medium">{model.label}</div>
-                        <div className="text-xs text-muted-foreground w-full truncate">
+                        <div className="text-xs text-muted-foreground truncate max-w-[230px]">
                           {model.value}
                         </div>
                       </div>
-                    </DropdownMenuRadioItem>
+                      <div
+                        className={cn(
+                          'flex items-center gap-1 px-2 py-1 rounded-full',
+                          model.value === currentModel?.value
+                            ? 'bg-gradient-to-r from-emerald-500/10 to-green-500/10 text-emerald-600'
+                            : 'bg-muted/40 text-muted-foreground',
+                        )}
+                      >
+                        <Zap
+                          className={cn(
+                            'h-3.5 w-3.5',
+                            model.value === currentModel?.value
+                              ? 'text-emerald-500'
+                              : '',
+                          )}
+                        />
+                        <span className="text-xs font-medium whitespace-nowrap">
+                          {model.value === currentModel?.value ? (
+                            typeof veDisplay === 'string' ? (
+                              <span>
+                                {veDisplay.replace(' VE', '')}{' '}
+                                <span className="text-green-500">VE</span>
+                              </span>
+                            ) : (
+                              veDisplay
+                            )
+                          ) : typeof modelVeCosts[model.value] === 'string' ? (
+                            <span>
+                              {(modelVeCosts[model.value] || '').replace(
+                                ' VE',
+                                '',
+                              )}{' '}
+                              <span className="text-green-500">VE</span>
+                            </span>
+                          ) : (
+                            'VE'
+                          )}
+                        </span>
+                      </div>
+                    </button>
                   ))}
-                </DropdownMenuRadioGroup>
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
 

@@ -5,7 +5,6 @@ import { pino } from 'pino' // Assuming pino is used for logging, adjust if glob
 import { z } from 'zod'
 
 import { sql } from 'drizzle-orm'
-import { REQUIRED_VE_FOR_GENERATION } from '../config/constants' // Import the constant
 import { db } from '../db'
 import { jams, messages as messagesTable } from '../db/schema' // usersTable for VE check, messagesTable
 import { verifyUserJamOwnership } from '../lib/dbUtils' // Import new helper
@@ -14,7 +13,7 @@ import {
   requireAuthMiddleware,
 } from '../middleware/auth'
 import { imageGenerationService } from '../services/imageGenerationService' // Cleaned up import
-import { deductVibeEnergy } from '../services/veService' // Import new VE service
+import { deductVibeEnergy } from '../services/veService'
 import type {
   GenerateImageClientResponse,
   SuccessfulGenerationClientResponse,
@@ -183,9 +182,6 @@ jamApp.post(
     >
 
     try {
-      // Verify jam ownership (optional, depends on if generation should be tied to owning the jam)
-      // For now, we assume a user can generate for any jamId they have, linking via prompt.
-      // If strict ownership is needed:
       const ownership = await verifyUserJamOwnership(user.id, jamId)
       if (!ownership.jamExists) {
         return c.json({ code: 404, message: 'Jam not found.' }, 404)
@@ -198,43 +194,8 @@ jamApp.post(
         return c.json({ code: 403, message: 'Forbidden.' }, 403)
       }
 
-      // Step 1 & 2: Check and Deduct Vibe Energy using veService
-      const veResult = await deductVibeEnergy(
-        user.id,
-        REQUIRED_VE_FOR_GENERATION,
-        'generate',
-        jamId, // Using jamId as refId for VE txn for now
-      )
-
-      if (!veResult.success) {
-        pinoLogger.warn(
-          {
-            userId: user.id,
-            currentVE: veResult.currentVE,
-            requiredVE: veResult.requiredVE,
-            message: veResult.message,
-          },
-          'Vibe Energy deduction failed.',
-        )
-        return c.json(
-          {
-            code: (veResult.statusCode || 400) as number, // Keep original body code as number
-            message: veResult.message || 'Failed to process Vibe Energy.',
-            ...(veResult.currentVE !== undefined && {
-              currentVE: veResult.currentVE,
-            }),
-            ...(veResult.requiredVE !== undefined && {
-              requiredVE: veResult.requiredVE,
-            }),
-          } as GenerateImageClientResponse,
-          (veResult.statusCode || 400) as ValidHttpStatusCodes,
-        )
-      }
-
-      pinoLogger.info(
-        { userId: user.id, newVE: veResult.newVE },
-        'Vibe Energy processed successfully for image generation.',
-      )
+      // Step 1: Prepare for image generation (VE check will be done before this in a more robust system)
+      // For now, we generate first, then deduct.
 
       const serviceParams: GenerateImageParams = {
         prompt: validatedBody.prompt,
@@ -245,14 +206,12 @@ jamApp.post(
           validatedBody.isMultiModalLanguageModel || false,
       }
 
-      // Add size or aspectRatio parameter based on what was provided
       if (validatedBody.size) {
         serviceParams.size = validatedBody.size
       } else if (validatedBody.aspectRatio) {
         serviceParams.aspectRatio = validatedBody.aspectRatio
       }
 
-      // For multi-modal models, use the messages provided by the frontend
       if (validatedBody.isMultiModalLanguageModel && validatedBody.messages) {
         serviceParams.messages = validatedBody.messages
         pinoLogger.info(
@@ -284,6 +243,56 @@ jamApp.post(
           500 as ValidHttpStatusCodes,
         )
       }
+
+      // Step 2: Deduct Vibe Energy *after* successful generation
+      const veDeductionResult = await deductVibeEnergy(
+        user.id,
+        'generate', // actionType
+        validatedBody.modelId, // modelId for cost lookup
+        jamId, // refId
+      )
+
+      if (!veDeductionResult.success) {
+        pinoLogger.error(
+          {
+            userId: user.id,
+            jamId,
+            modelId: validatedBody.modelId,
+            veMessage: veDeductionResult.message,
+            veStatusCode: veDeductionResult.statusCode,
+            serviceResponse, // Log the successful image generation response
+          },
+          'Image generated successfully, but Vibe Energy deduction failed post-generation. Critical issue.',
+        )
+        // Decide on response: Do we still return the image? Or an error indicating partial success?
+        // For now, let's return a specific error indicating image was generated but VE failed.
+        // This is better than pretending everything is fine or denying the generated image.
+        return c.json(
+          {
+            code: 500, // Or a custom code like 207 (Multi-Status) if more granular
+            message:
+              'Image generated, but failed to update Vibe Energy. Please contact support.',
+            // Optionally include image data here if we decide to give it to the user anyway
+            // For now, we treat this as a failure to complete the transaction cleanly.
+            imageUrl:
+              serviceResponse.images && serviceResponse.images.length > 0
+                ? serviceResponse.images[0].url
+                : undefined,
+            altText: serviceResponse.text, // or some other alt text logic
+          } as GenerateImageClientResponse,
+          500 as ValidHttpStatusCodes, // Or veDeductionResult.statusCode if appropriate
+        )
+      }
+
+      pinoLogger.info(
+        {
+          userId: user.id,
+          jamId,
+          modelId: validatedBody.modelId,
+          newVE: veDeductionResult.newVE,
+        },
+        'Vibe Energy deducted successfully post-generation.',
+      )
 
       // Store text and/or images depending on what we got back
       const assistantMessageText =

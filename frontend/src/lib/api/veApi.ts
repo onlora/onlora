@@ -36,3 +36,40 @@ export const claimDailyBonus = async (): Promise<DailyBonusClaimResponse> => {
     }
   }
 }
+
+export interface VeCostResponse {
+  cost: number
+  error?: string // To accommodate error responses from the API
+}
+
+/**
+ * Fetches the Vibe Energy cost for a specific action and model.
+ */
+export const getActionVeCost = async (
+  actionType: string,
+  modelId?: string,
+): Promise<VeCostResponse> => {
+  const queryParams = new URLSearchParams({ actionType })
+  if (modelId) {
+    queryParams.append('modelId', modelId)
+  }
+  // Assuming the endpoint is mounted at /api/ve/cost
+  try {
+    return await apiClient<VeCostResponse>(
+      `/ve/cost?${queryParams.toString()}`,
+      {
+        method: 'GET',
+        credentials: 'include', // Include if your endpoint requires authentication
+      },
+    )
+  } catch (error) {
+    console.error('Error in getActionVeCost API call:', error)
+    const apiError = error as ApiError
+    // Return an error structure compatible with VeCostResponse
+    return {
+      cost: -1, // Indicate error or indeterminate cost
+      error:
+        apiError.message || 'Failed to fetch VE cost due to an unknown error.',
+    }
+  }
+}

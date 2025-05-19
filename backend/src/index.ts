@@ -17,6 +17,7 @@ import modelRoutes from './routes/modelRoutes'
 import postRoutes from './routes/postRoutes'
 import searchRoutes from './routes/searchRoutes'
 import userRoutes from './routes/userRoutes'
+import veAppRoutes from './routes/veRoutes'
 
 interface AppEnv extends AuthenticatedContextEnv {}
 
@@ -72,6 +73,7 @@ app.route('/api/feed', feedRoutes)
 app.route('/api/users', userRoutes)
 app.route('/api/search', searchRoutes)
 app.route('/api/models', modelRoutes)
+app.route('/api/ve', veAppRoutes)
 
 // Basic public routes
 app.get('/', (c) => {

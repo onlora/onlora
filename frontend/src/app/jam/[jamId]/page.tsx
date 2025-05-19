@@ -594,7 +594,7 @@ export default function JamPage() {
               className="rounded-full px-3 gap-2 text-sm font-medium border-accent/30 hover:bg-accent/30 transition-colors"
             >
               <a
-                href="https://forms.gle/your-feedback-form-link" // TODO: Replace with your actual feedback form link
+                href="https://hey.xyz/u/onlora" // TODO: Replace with your actual feedback form link
                 target="_blank"
                 rel="noopener noreferrer"
               >

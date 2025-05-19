@@ -1551,4 +1551,36 @@ userRoutes.get(
   },
 )
 
+// GET /api/users/me/ve-balance - Fetch the current user's VE balance
+userRoutes.get('/me/ve-balance', requireAuthMiddleware, async (c) => {
+  const user = c.get('user')
+  if (!user || !user.id) {
+    throw new HTTPException(401, { message: 'Authentication required' })
+  }
+  const userId = user.id
+
+  try {
+    const userRecord = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: {
+        vibe_energy: true,
+      },
+    })
+
+    if (!userRecord) {
+      throw new HTTPException(404, { message: 'User not found' })
+    }
+
+    return c.json({
+      balance: userRecord.vibe_energy || 0,
+    })
+  } catch (error) {
+    if (error instanceof HTTPException) throw error
+    console.error(`Error fetching VE balance for user ${userId}:`, error)
+    throw new HTTPException(500, {
+      message: 'Failed to fetch VE balance',
+    })
+  }
+})
+
 export default userRoutes
