@@ -2,12 +2,14 @@
 
 import { SignInButton } from '@/components/auth/SignInButton'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { CheckInButton } from '@/components/ui/check-in-button'
 import { useSession } from '@/lib/authClient'
 import { signOutWithLens } from '@/lib/authClient'
 import { getInitials } from '@/lib/utils'
 import {
   Bell,
   Bookmark,
+  Calendar,
   Coins,
   Home,
   LayoutGrid,
@@ -123,6 +125,13 @@ export default function Sidebar() {
       icon: <Coins className="h-5 w-5" />,
       label: 'VE History',
     },
+    // Add CheckInButton as a special item that renders button instead of Link
+    {
+      type: 'button',
+      icon: <Calendar className="h-5 w-5" />,
+      component: <CheckInButton />,
+      requireAuth: true,
+    },
   ]
 
   // Render the main navigation items
@@ -169,32 +178,58 @@ export default function Sidebar() {
           <div className="flex items-center space-x-3">
             <Avatar className="h-10 w-10">
               <AvatarImage
-                src={user.image ?? undefined}
-                alt={user.name ?? 'User'}
+                src={typeof user?.image === 'string' ? user.image : ''}
+                alt={typeof user?.name === 'string' ? user.name : 'User'}
               />
-              <AvatarFallback>{getInitials(user.name)}</AvatarFallback>
+              <AvatarFallback>
+                {getInitials(typeof user?.name === 'string' ? user.name : '')}
+              </AvatarFallback>
             </Avatar>
-            <span className="text-sm font-medium">{user.name}</span>
+            <span className="text-sm font-medium">
+              {typeof user?.name === 'string' ? user.name : 'User'}
+            </span>
           </div>
         </button>
 
         {isProfileMenuOpen && (
           <div className="mt-2 py-2 px-1 bg-muted/30 rounded-xl">
-            {profileItems.map((item) => (
-              <Link
-                key={item.path}
-                href={item.path}
-                className={`flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all hover:bg-muted/50 active:bg-muted ${
-                  isActive(item.path)
-                    ? 'text-primary bg-primary/5'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-                onClick={() => setIsProfileMenuOpen(false)}
-              >
-                <span className="mr-3">{item.icon}</span>
-                <span>{item.label}</span>
-              </Link>
-            ))}
+            {profileItems.map((item) => {
+              // Special handling for button type items like CheckInButton
+              if (item.type === 'button') {
+                return (
+                  (!item.requireAuth || isLoggedIn) && (
+                    <div
+                      key={`btn-${Math.random().toString(36).slice(2, 7)}`}
+                      className="px-4 py-2"
+                    >
+                      {item.component}
+                    </div>
+                  )
+                )
+              }
+
+              // Normal link items - safely cast to link type
+              const linkItem = item as {
+                path: string
+                icon: React.ReactNode
+                label: string
+              }
+              return (
+                <Link
+                  key={linkItem.path}
+                  href={linkItem.path}
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all hover:bg-muted/50 active:bg-muted ${
+                    isActive(linkItem.path)
+                      ? 'text-primary bg-primary/5'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                  onClick={() => setIsProfileMenuOpen(false)}
+                >
+                  <span className="mr-3">{linkItem.icon}</span>
+                  <span>{linkItem.label}</span>
+                </Link>
+              )
+            })}
 
             <button
               type="button"

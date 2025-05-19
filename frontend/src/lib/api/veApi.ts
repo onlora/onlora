@@ -6,6 +6,11 @@ export interface DailyBonusClaimResponse {
   newVeBalance?: number
   claimedToday?: boolean // Indicates if the bonus was (already) claimed for the current day by the backend
   alreadyClaimed?: boolean // Explicitly true if the reason for no VE change is because it was already claimed
+  checkInStreak?: number // Current check-in streak
+  monthlyCheckIns?: number // Number of check-ins this month
+  maxMonthlyCheckIns?: number // Maximum allowed check-ins per month
+  streakBonus?: number // Bonus VE earned from streak
+  monthlyLimitReached?: boolean // True if the user has reached their monthly check-in limit
 }
 
 /**

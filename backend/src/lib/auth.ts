@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { config } from '../config'
+import { INITIAL_VE_BALANCE } from '../config/constants'
 import { db } from '../db'
 import {
   accounts as accountsAuthTable,
@@ -59,7 +60,7 @@ export const auth = betterAuth({
 
             await db.insert(veTxns).values({
               userId: userId,
-              delta: 50,
+              delta: INITIAL_VE_BALANCE,
               reason: 'signup',
               // ref_id might be null or point to the user_id itself if appropriate
             })

@@ -17,6 +17,8 @@ export const users = pgTable('users', {
   last_daily_bonus_claimed_at: timestamp('last_daily_bonus_claimed_at', {
     withTimezone: true,
   }),
+  check_in_streak: integer('check_in_streak').default(0),
+  monthly_check_ins: integer('monthly_check_ins').default(0),
 
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()

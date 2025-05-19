@@ -971,100 +971,15 @@ userRoutes.get(
 // This might live in a shared types/schema location if used elsewhere.
 const VeTransactionReasonEnum = z.enum([
   'signup_bonus',
-  'daily_login_bonus',
+  'daily_check_in', // Changed from daily_login_bonus to match the check-in mechanism
   'image_generation_cost',
   'image_generation_refund',
   'post_publish_bonus',
   'post_remixed_bonus',
 ])
 
-// POST /api/users/ve/daily-check-in - Claim daily VE bonus
-// (Mounted under /api/users as per current file structure, could be /api/ve/daily-check-in)
-userRoutes.post(
-  '/ve/daily-check-in', // Path relative to where userRoutes is mounted (e.g. /api/users/ve/daily-check-in)
-  requireAuthMiddleware,
-  async (c) => {
-    const userSession = c.get('user')
-    if (!userSession || !userSession.id) {
-      throw new HTTPException(401, { message: 'Authentication required.' })
-    }
-    const userId = userSession.id
-
-    try {
-      const todayUTCStart = new Date()
-      todayUTCStart.setUTCHours(0, 0, 0, 0)
-
-      const currentUserState = await db.query.users.findFirst({
-        where: eq(users.id, userId),
-        columns: {
-          vibe_energy: true,
-          last_daily_bonus_claimed_at: true,
-        },
-      })
-
-      if (!currentUserState) {
-        throw new HTTPException(404, { message: 'User not found.' })
-      }
-
-      let alreadyClaimedToday = false
-      if (currentUserState.last_daily_bonus_claimed_at) {
-        const lastClaimDate = new Date(
-          currentUserState.last_daily_bonus_claimed_at,
-        )
-        if (lastClaimDate >= todayUTCStart) {
-          alreadyClaimedToday = true
-        }
-      }
-
-      if (alreadyClaimedToday) {
-        return c.json({
-          success: true,
-          message: 'Daily bonus already claimed for today.',
-          newVeBalance: currentUserState.vibe_energy,
-          claimedToday: true,
-          alreadyClaimed: true,
-        })
-      }
-
-      // Award bonus
-      const dailyBonusAmount = 10
-      const newVeBalance =
-        (currentUserState.vibe_energy || 0) + dailyBonusAmount
-
-      await db.transaction(async (tx) => {
-        // Update user's VE and last claimed timestamp
-        await tx
-          .update(users)
-          .set({
-            vibe_energy: newVeBalance,
-            last_daily_bonus_claimed_at: new Date(),
-          })
-          .where(eq(users.id, userId))
-
-        // Insert into veTxns table using actual schema
-        await tx.insert(veTxns).values({
-          userId: userId,
-          delta: dailyBonusAmount,
-          reason: VeTransactionReasonEnum.Enum.daily_login_bonus,
-          refId: null, // refId is null for daily bonus
-        })
-        // console.log(`TODO: Record +${dailyBonusAmount} VE txn for user ${userId} for daily bonus.`) // Remove placeholder log
-      })
-
-      return c.json({
-        success: true,
-        message: 'Daily bonus claimed successfully!',
-        newVeBalance: newVeBalance,
-        claimedToday: true,
-        alreadyClaimed: false,
-      })
-    } catch (error) {
-      if (error instanceof HTTPException) throw error
-      console.error(`Error claiming daily bonus for user ${userId}:`, error)
-      throw new HTTPException(500, { message: 'Failed to claim daily bonus' })
-    }
-  },
-)
+// NOTE: The daily check-in endpoint has been moved to veRoutes.ts
+// It is now mounted at /api/ve/daily-check-in instead of /api/users/ve/daily-check-in
 
 // GET /api/users/me/posts - Fetches posts for the authenticated user (for gallery)
 userRoutes.get(

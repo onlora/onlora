@@ -417,50 +417,52 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               <DropdownMenuContent align="start" className="w-[350px] p-2">
                 <div className="flex justify-between items-center px-3 py-2 mb-2">
                   <h3 className="text-base font-medium">AI Model</h3>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div className="flex items-center px-2 py-1 gap-1.5 bg-gradient-to-r from-emerald-500/10 to-green-500/10 border border-emerald-500/20 rounded-lg cursor-help">
-                          <Wallet className="h-3.5 w-3.5 text-emerald-500" />
-                          <span className="text-sm">
-                            {veBalanceLoading ? (
-                              <span className="text-muted-foreground">
-                                Loading...
-                              </span>
-                            ) : veBalanceError ? (
-                              <span className="text-muted-foreground">
-                                Error
-                              </span>
-                            ) : (
-                              <span>
-                                <span className="text-emerald-500/70 text-xs">
-                                  Available:
-                                </span>{' '}
-                                <span className="font-medium text-emerald-600">
-                                  {veBalanceData?.balance || 0}{' '}
-                                  <span className="text-green-500">VE</span>
+                  <div className="flex items-center gap-2">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center px-2 py-1 gap-1.5 bg-gradient-to-r from-emerald-500/10 to-green-500/10 border border-emerald-500/20 rounded-lg cursor-help">
+                            <Wallet className="h-3.5 w-3.5 text-emerald-500" />
+                            <span className="text-sm">
+                              {veBalanceLoading ? (
+                                <span className="text-muted-foreground">
+                                  Loading...
                                 </span>
+                              ) : veBalanceError ? (
+                                <span className="text-muted-foreground">
+                                  Error
+                                </span>
+                              ) : (
+                                <span>
+                                  <span className="text-emerald-500/70 text-xs">
+                                    Available:
+                                  </span>{' '}
+                                  <span className="font-medium text-emerald-600">
+                                    {veBalanceData?.balance || 0}{' '}
+                                    <span className="text-green-500">VE</span>
+                                  </span>
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          <p>
+                            <span className="font-medium">
+                              Your Vibe Energy Balance
+                            </span>{' '}
+                            - This is the amount of VE available to create
+                            images. Refreshes every 24 hours.
+                            {veBalanceError && (
+                              <span className="block text-destructive text-xs mt-1">
+                                Unable to load your current balance
                               </span>
                             )}
-                          </span>
-                        </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs">
-                        <p>
-                          <span className="font-medium">
-                            Your Vibe Energy Balance
-                          </span>{' '}
-                          - This is the amount of VE available to create images.
-                          Refreshes every 24 hours.
-                          {veBalanceError && (
-                            <span className="block text-destructive text-xs mt-1">
-                              Unable to load your current balance
-                            </span>
-                          )}
-                        </p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                 </div>
                 <div className="space-y-1">
                   {availableModels.map((model) => (
