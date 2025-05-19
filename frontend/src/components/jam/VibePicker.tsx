@@ -31,7 +31,6 @@ export function VibePickerComponent() {
     setIsLoading(true)
     try {
       const newJam = await createJam()
-      toast.success('New Jam created!')
       router.push(`/jam/${newJam.jamId}`)
     } catch (error) {
       console.error('Failed to create new Jam:', error)

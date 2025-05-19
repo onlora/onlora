@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto' // For generating UUIDs
 import { zValidator } from '@hono/zod-validator'
+import type { Resource } from '@lens-chain/storage-client'
+import { MediaImageMimeType, image, textOnly } from '@lens-protocol/metadata'
 import { and, eq, sql } from 'drizzle-orm'
 import { type Context, Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
@@ -9,13 +11,19 @@ import {
   bookmarks,
   follows,
   images,
+  lensAccounts,
+  lensPosts,
   likes,
   postImages,
   posts,
   users,
   veTxns,
   visibilityEnum,
-} from '../db/schema' // Adjust path as needed
+} from '../db/schema'
+import {
+  getImmutableAcl,
+  lensGroveStorageClient,
+} from '../lib/lens-grove-storage'
 import { uploadBufferToR2 } from '../lib/r2' // Import R2 upload function
 import {
   type AuthenticatedContextEnv,
@@ -27,6 +35,9 @@ import {
   createCommentSchema,
   getCommentsByPostId,
 } from '../services/commentService' // Import from service
+
+// Constants
+const ONLORA_LENS_APP_ID = '0x46E8f06e085f68864Ef5616c9f5dEB514a7fd617'
 
 // UUID validation pattern
 const uuidPattern =
@@ -1283,6 +1294,277 @@ postRoutes.get(
       if (error instanceof HTTPException) throw error
       console.error(`Error fetching remix tree for post ${postId}:`, error)
       throw new HTTPException(500, { message: 'Failed to fetch remix tree' })
+    }
+  },
+)
+
+// POST /api/posts/create-and-link-lens - Link a post to Lens Protocol
+const createAndLinkLensSchema = z.object({
+  postId: z.string().regex(uuidPattern, 'Post ID must be a valid UUID'),
+  lensPostId: z.string().min(1, 'Lens Post ID is required'),
+  lensContentUri: z.string().min(1, 'Lens Content URI is required'),
+  lensTransactionHash: z.string().min(1, 'Lens Transaction Hash is required'),
+  lensAccountId: z.string().min(1, 'Lens Account ID is required'),
+})
+
+postRoutes.post(
+  '/create-and-link-lens',
+  requireAuthMiddleware,
+  zValidator('json', createAndLinkLensSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid request data',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user?.id) {
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+
+    try {
+      const payload = c.req.valid('json')
+
+      // Verify post ownership
+      const post = await db.query.posts.findFirst({
+        where: eq(posts.id, payload.postId),
+        columns: { authorId: true },
+      })
+
+      if (!post) {
+        throw new HTTPException(404, { message: 'Post not found' })
+      }
+
+      if (post.authorId !== user.id) {
+        throw new HTTPException(403, {
+          message: 'You do not have permission to link this post',
+        })
+      }
+
+      // Verify lens account ownership
+      console.log('payload.lensAccountId:', payload.lensAccountId)
+      console.log('lensAccounts.address:', lensAccounts.address)
+      const lensAccount = await db.query.lensAccounts.findFirst({
+        where: eq(
+          lensAccounts.address,
+          sql`LOWER(${payload.lensAccountId})::text = LOWER(lens_accounts.address)::text`,
+        ),
+        columns: { userId: true, id: true },
+      })
+
+      if (!lensAccount) {
+        throw new HTTPException(404, { message: 'Lens account not found' })
+      }
+
+      if (lensAccount.userId !== user.id) {
+        throw new HTTPException(403, {
+          message: 'You do not have permission to use this Lens account',
+        })
+      }
+
+      // Create lens post record
+      const result = await db.transaction(async (tx) => {
+        const [lensPost] = await tx
+          .insert(lensPosts)
+          .values({
+            postId: payload.postId,
+            accountId: lensAccount.id, // Use the internal id
+            lensPostId: payload.lensPostId,
+            metadataUri: payload.lensContentUri,
+            transactionHash: payload.lensTransactionHash,
+            lensPublishedAt: new Date(),
+          })
+          .returning()
+
+        return { success: true, lensPost }
+      })
+
+      return c.json(result)
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error('Error linking post to Lens:', error)
+      throw new HTTPException(500, { message: 'Failed to link post to Lens' })
+    }
+  },
+)
+
+// POST /api/posts/prepare-lens-metadata - Prepare metadata for Lens post
+const prepareLensMetadataSchema = z.object({
+  postId: z.string().regex(uuidPattern, 'Post ID must be a valid UUID'),
+  title: z.string().min(1, 'Title is required'),
+  description: z.string().optional(),
+  images: z.array(
+    z.object({
+      data: z.string(), // base64 data or URL
+      altText: z.string().optional(),
+    }),
+  ),
+})
+
+postRoutes.post(
+  '/prepare-lens-metadata',
+  requireAuthMiddleware,
+  zValidator('json', prepareLensMetadataSchema, (result, c) => {
+    if (!result.success) {
+      throw new HTTPException(400, {
+        message: 'Invalid request data',
+        cause: result.error.flatten(),
+      })
+    }
+  }),
+  async (c) => {
+    const user = c.get('user')
+    if (!user?.id) {
+      throw new HTTPException(401, { message: 'Authentication required' })
+    }
+
+    try {
+      const payload = c.req.valid('json')
+
+      // Verify post ownership
+      const post = await db.query.posts.findFirst({
+        where: eq(posts.id, payload.postId),
+        columns: { authorId: true },
+      })
+
+      if (!post) {
+        throw new HTTPException(404, { message: 'Post not found' })
+      }
+
+      if (post.authorId !== user.id) {
+        throw new HTTPException(403, {
+          message:
+            'You do not have permission to prepare metadata for this post',
+        })
+      }
+
+      // Get immutable ACL for Lens Grove
+      const acl = getImmutableAcl()
+
+      // Process images if any
+      const hasImages = payload.images && payload.images.length > 0
+      let contentUri = '' // Initialize with empty string
+
+      if (hasImages) {
+        // Process and prepare image files
+        const imageFiles: File[] = []
+        for (const imageData of payload.images) {
+          // Process base64 image
+          if (imageData.data.startsWith('data:image')) {
+            const matches = imageData.data.match(
+              /^data:([A-Za-z-+/]+);base64,(.+)$/,
+            )
+            if (!matches || matches.length !== 3) {
+              continue
+            }
+
+            const contentType = matches[1]
+            const base64Data = matches[2]
+            const imageBuffer = Buffer.from(base64Data, 'base64')
+            const extension = contentType.split('/')[1] || 'png'
+            const filename = `lens-${Date.now()}.${extension}`
+
+            // Create File object from buffer
+            const blob = new Blob([imageBuffer], { type: contentType })
+            const file = new File([blob], filename, { type: contentType })
+            imageFiles.push(file)
+          } else {
+            // If it's a URL, fetch and convert to File
+            const response = await fetch(imageData.data)
+            const blob = await response.blob()
+            const filename = `lens-${Date.now()}.${blob.type.split('/')[1] || 'png'}`
+            const file = new File([blob], filename, { type: blob.type })
+            imageFiles.push(file)
+          }
+        }
+
+        if (imageFiles.length === 0) {
+          throw new HTTPException(400, {
+            message: 'Failed to process any images',
+          })
+        }
+
+        console.log(
+          '[prepare-lens-metadata] imageFiles:',
+          imageFiles.map((f) => ({ name: f.name, type: f.type, size: f.size })),
+        )
+
+        // Upload to Lens Grove with metadata
+        const { folder, files } = await lensGroveStorageClient.uploadFolder(
+          imageFiles,
+          {
+            acl,
+            index: (resources: Resource[]) => {
+              // Only take the first imageFiles.length resources, to exclude the auto-generated index file
+              const imageResources = resources.slice(0, imageFiles.length)
+              console.log(
+                '[prepare-lens-metadata] filtered imageResources:',
+                imageResources,
+              )
+              let metadata: unknown
+              if (imageResources.length > 1) {
+                metadata = image({
+                  image: {
+                    item: imageResources[0].uri,
+                    type: MediaImageMimeType.PNG,
+                    altTag: payload.images[0]?.altText || payload.title,
+                  },
+                  attachments: imageResources
+                    .slice(1)
+                    .map((resource, index) => ({
+                      item: resource.uri,
+                      type: MediaImageMimeType.PNG,
+                      altTag:
+                        payload.images[index + 1]?.altText ||
+                        `Image ${index + 1}`,
+                    })),
+                  title: payload.title,
+                  ...(payload.description && { content: payload.description }),
+                })
+              } else {
+                metadata = image({
+                  image: {
+                    item: imageResources[0].uri,
+                    type: MediaImageMimeType.PNG,
+                    altTag: payload.images[0]?.altText || payload.title,
+                  },
+                  title: payload.title,
+                  ...(payload.description && { content: payload.description }),
+                })
+              }
+              console.log(
+                '[prepare-lens-metadata] generated metadata:',
+                metadata,
+              )
+              return metadata
+            },
+          },
+        )
+        console.log('[prepare-lens-metadata] upload result folder:', folder)
+        console.log('[prepare-lens-metadata] upload result files:', files)
+
+        contentUri = folder.uri
+      } else {
+        // Text-only post
+        const metadata = textOnly({
+          content: payload.description || payload.title,
+        })
+
+        const { uri } = await lensGroveStorageClient.uploadAsJson(metadata, {
+          acl,
+        })
+        contentUri = uri
+      }
+
+      return c.json({ contentUri })
+    } catch (error) {
+      if (error instanceof HTTPException) throw error
+      console.error('Error preparing Lens metadata:', error)
+      throw new HTTPException(500, {
+        message: 'Failed to prepare Lens metadata',
+      })
     }
   },
 )

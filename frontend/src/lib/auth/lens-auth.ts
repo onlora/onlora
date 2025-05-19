@@ -1,7 +1,7 @@
 import { signMessageWith } from '@lens-protocol/client/viem'
 import type { WalletClient } from 'viem'
 import { authClient } from '../authClient'
-import { TEST_LENS_APP_ID, lensClient } from '../lens-client'
+import { ONLORA_LENS_APP_ID, lensClient } from '../lens-client'
 
 /**
  * Login to Lens and get an ID token for authentication
@@ -29,7 +29,7 @@ export async function loginToLensAndGetIdToken(
   const loginResult = await lensClient.login({
     accountOwner: {
       account: lensAccountAddress,
-      app: TEST_LENS_APP_ID,
+      app: ONLORA_LENS_APP_ID,
       owner: walletClient.account.address,
     },
     signMessage: signMessageWith(walletClient),

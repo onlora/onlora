@@ -295,7 +295,7 @@ jamApp.post(
         imagesToStore = serviceResponse.images.map((image, index) => {
           const imageUrlToStore =
             image.url || `data:image/png;base64,${image.base64}`
-          const imageAltText = `Generated image ${index + 1} for: "${validatedBody.prompt.substring(0, 100)}${validatedBody.prompt.length > 100 ? '...' : ''}"`
+          const imageAltText = `"${validatedBody.prompt.substring(0, 100)}${validatedBody.prompt.length > 100 ? '...' : ''}"`
 
           return {
             id: randomUUID(), // Generate a proper UUID for each image

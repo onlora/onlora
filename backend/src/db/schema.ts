@@ -15,7 +15,7 @@ import { users } from './auth-schema'
 import { lensAccounts, lensPosts } from './lens-schema'
 
 // Re-export users so it can be imported from this module by other files
-export { users }
+export { users, lensAccounts, lensPosts }
 
 // Enums
 export const visibilityEnum = pgEnum('visibility_e', ['public', 'private'])

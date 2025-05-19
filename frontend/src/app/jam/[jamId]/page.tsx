@@ -15,6 +15,8 @@ import {
   createPost,
   getPostCloneInfo,
 } from '@/lib/api/postApi'
+import { getSessionClient, isLensLoggedIn } from '@/lib/lens-client'
+import { linkLensPost, publishToLens } from '@/lib/lens-post'
 import { cn } from '@/lib/utils'
 import type { MessageImage } from '@/types/images'
 import type { AIModelData } from '@/types/models'
@@ -29,9 +31,40 @@ import {
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { useWalletClient } from 'wagmi'
 
 type ImageSize = '512x512' | '768x768' | '1024x1024'
 const CHAT_HISTORY_LENGTH = 15
+
+async function urlToImageFile(
+  imageUrl: string,
+  filename = 'image.png',
+): Promise<File | null> {
+  try {
+    // Attempt to fetch directly first
+    let response = await fetch(imageUrl)
+
+    // If direct fetch fails (e.g., CORS), try a proxy
+    if (!response.ok) {
+      console.warn(`Direct fetch failed for ${imageUrl}, trying proxy...`)
+      const proxyUrl = `/api/cors-proxy?url=${encodeURIComponent(imageUrl)}`
+      response = await fetch(proxyUrl)
+    }
+
+    if (!response.ok) {
+      console.error(
+        `Failed to fetch image (direct and proxy): ${imageUrl} - ${response.status} ${response.statusText}`,
+      )
+      return null
+    }
+
+    const blob = await response.blob()
+    return new File([blob], filename, { type: blob.type || 'image/png' }) // Default type if not available
+  } catch (error) {
+    console.error(`Error converting URL to image file for ${imageUrl}:`, error)
+    return null
+  }
+}
 
 export default function JamPage() {
   // Core state and hooks
@@ -73,6 +106,9 @@ export default function JamPage() {
     resolvedJamId,
     isInitializing,
   } = useJam(jamIdFromParams)
+
+  // 新增钱包hooks
+  const { data: walletClient } = useWalletClient()
 
   // Extract all images from messages when they load or change
   useEffect(() => {
@@ -319,7 +355,7 @@ export default function JamPage() {
 
   // Save to gallery mutation
   const { mutate: saveToGallery, isPending: isSavingToGallery } = useMutation<
-    { postId: number },
+    { postId: string },
     ApiError,
     void
   >({
@@ -362,7 +398,8 @@ export default function JamPage() {
         visibility: 'private', // Save to gallery = private post
       }
 
-      return createPost(payload)
+      const result = await createPost(payload)
+      return { postId: result.postId }
     },
     onSuccess: (data) => {
       setSelectedImageIds(new Set()) // Clear selection after saving
@@ -398,7 +435,7 @@ export default function JamPage() {
 
   // Publish post mutation
   const { mutate: publishPost, isPending: isPublishingPost } = useMutation<
-    { postId: number },
+    { postId: string },
     ApiError,
     PublishData
   >({
@@ -447,7 +484,40 @@ export default function JamPage() {
         payload.generation = initialPublishData.generation
       }
 
-      return createPost(payload)
+      // Original posting logic - create Onlora post
+      const onloraResult = await createPost(payload)
+
+      // Lens integration - try to publish to Lens if user is logged in
+      if ((await isLensLoggedIn()) && walletClient) {
+        try {
+          // Get authenticated Lens session
+          const sessionClient = await getSessionClient()
+
+          if (sessionClient) {
+            // Publish to Lens
+            const lensResult = await publishToLens(
+              payload,
+              onloraResult.postId,
+              walletClient,
+            )
+
+            console.log('Lens result:', lensResult)
+
+            // Link Lens post to Onlora post
+            await linkLensPost(onloraResult.postId, lensResult)
+
+            console.log(
+              'Successfully published to Lens:',
+              lensResult.lensPostId,
+            )
+          }
+        } catch (error) {
+          // Log error but continue (Onlora post is already created)
+          console.error('Failed to publish to Lens:', error)
+        }
+      }
+
+      return { postId: onloraResult.postId }
     },
     onSuccess: (data) => {
       setIsPublishSheetOpen(false)

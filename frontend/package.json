@@ -12,6 +12,7 @@
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@lens-chain/sdk": "^1.0.3",
+    "@lens-chain/storage-client": "^1.0.4",
     "@lens-protocol/client": "^0.0.0-canary-20250515092635",
     "@lens-protocol/react": "^2.0.0",
     "@radix-ui/react-alert-dialog": "^1.1.13",

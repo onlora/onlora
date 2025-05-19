@@ -66,7 +66,6 @@ export function useJam(initialJamId?: string | null): UseJamReturn {
     mutationFn: createJam,
     onSuccess: (data) => {
       setResolvedJamId(data.jamId)
-      toast.success('New Jam started!')
 
       // Update URL
       const currentPath = window.location.pathname.substring(

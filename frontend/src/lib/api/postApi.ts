@@ -250,3 +250,57 @@ export async function getRemixTree(postId: string): Promise<RemixTreeResponse> {
     credentials: 'include',
   })
 }
+
+// --- Link Lens Post --- //
+export interface LinkLensPostPayload {
+  postId: string
+  lensPostId: string
+  lensContentUri: string
+  lensTransactionHash: string
+  lensAccountId: string
+}
+
+export interface LinkLensPostResponse {
+  success: boolean
+}
+
+export async function linkLensPost(
+  payload: LinkLensPostPayload,
+): Promise<LinkLensPostResponse> {
+  return apiClient<LinkLensPostResponse, LinkLensPostPayload>(
+    '/posts/create-and-link-lens',
+    {
+      method: 'POST',
+      credentials: 'include',
+      body: payload,
+    },
+  )
+}
+
+// --- Prepare Lens Metadata --- //
+export interface PrepareLensMetadataPayload {
+  postId: string
+  title: string
+  description?: string
+  images: Array<{
+    data: string // base64 data or URL
+    altText?: string
+  }>
+}
+
+export interface PrepareLensMetadataResponse {
+  contentUri: string
+}
+
+export async function prepareLensMetadata(
+  payload: PrepareLensMetadataPayload,
+): Promise<PrepareLensMetadataResponse> {
+  return apiClient<PrepareLensMetadataResponse, PrepareLensMetadataPayload>(
+    '/posts/prepare-lens-metadata',
+    {
+      method: 'POST',
+      credentials: 'include',
+      body: payload,
+    },
+  )
+}
