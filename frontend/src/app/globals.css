@@ -78,48 +78,47 @@
     display: none;
   }
 
-  .masonry-item {
-    break-inside: avoid;
-    margin-bottom: 16px;
-    display: inline-block;
-    width: 100%;
-  }
-
-  .masonry-item.tall {
-    margin-bottom: 20px;
-  }
-
   .feed-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+    column-count: 2;
+    column-gap: 12px;
   }
 
   @media (min-width: 640px) {
     .feed-grid {
-      grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
+      column-count: 3;
+      column-gap: 16px;
     }
   }
 
   @media (min-width: 768px) {
     .feed-grid {
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
+      column-count: 4;
+      column-gap: 16px;
     }
   }
 
   @media (min-width: 1024px) {
     .feed-grid {
-      grid-template-columns: repeat(4, 1fr);
-      gap: 20px;
+      column-count: 4;
+      column-gap: 20px;
     }
   }
 
   @media (min-width: 1280px) {
     .feed-grid {
-      grid-template-columns: repeat(4, 1fr);
-      gap: 20px;
+      column-count: 4;
+      column-gap: 20px;
     }
+  }
+
+  .masonry-item {
+    break-inside: avoid;
+    margin-bottom: 16px;
+    width: 100%;
+    display: block;
+  }
+
+  .masonry-item.tall {
+    margin-bottom: 20px;
   }
 }

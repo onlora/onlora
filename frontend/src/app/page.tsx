@@ -140,7 +140,7 @@ export default function HomePage() {
     return (
       <div className="feed-grid">
         {allPosts.map((post: FeedPost) => (
-          <div key={`post-${post.id}`} className="w-full">
+          <div key={`post-${post.id}`} className="masonry-item">
             <FeedPostCard post={post} />
           </div>
         ))}
