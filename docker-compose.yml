@@ -32,11 +32,6 @@ services:
     environment:
       NODE_ENV: development # Or production, depending on use case
       DATABASE_URL: postgresql://${POSTGRES_USER:-onlora_user}:${POSTGRES_PASSWORD:-yoursecurepassword}@db:5432/${POSTGRES_DB:-onlora_db}
-      JWT_SECRET: ${JWT_SECRET:-averysecuresecretkeyforlocaldev}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      NEXTAUTH_URL: ${BACKEND_PUBLIC_URL:-http://localhost:8080}
-      AUTH_TRUST_HOST: "true"
       R2_BUCKET_NAME: ${R2_BUCKET_NAME}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
@@ -84,7 +79,7 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_BASE_URL: http://backend:8080 # Service discovery using Docker Compose service name
+      NEXT_PUBLIC_API_URL: http://backend:8080 # Service discovery using Docker Compose service name
       # Add other NEXT_PUBLIC_ variables needed by the frontend
     volumes:
       - ./frontend:/app # Mount code for local development

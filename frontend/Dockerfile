@@ -15,8 +15,8 @@ COPY . .
 
 # Build the Next.js application
 # Environment variables needed for build can be passed here using ARG and --build-arg
-# For example: ARG NEXT_PUBLIC_API_BASE_URL
-# ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+# For example: ARG NEXT_PUBLIC_API_URL
+# ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN bun run build
 
 # Stage 2: Production

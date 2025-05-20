@@ -46,7 +46,6 @@ LOG_LEVEL="info" # or "debug" for more verbose logging
 
 # Auth variables (check better-auth documentation)
 # e.g., AUTH_SECRET="your-super-secret-auth-key"
-#       AUTH_TRUST_HOST="true" 
 #       AUTH_REDIRECT_PROXY_URL="http://localhost:3000" (if using a frontend proxy)
 
 
