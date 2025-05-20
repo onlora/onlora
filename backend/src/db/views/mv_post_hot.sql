@@ -13,8 +13,8 @@ SELECT
   -- Hotness score formula: Remixes are weighted higher
   (COALESCE(p.remix_count, 0) * 2 + COALESCE(p.like_count, 0) + COALESCE(p.comment_count, 0)) AS score,
   p.created_at,
-  u.username AS author_username, -- Added for convenience
-  u.image AS author_avatar_url -- Added for convenience
+  u.name AS author_username, 
+  u.image AS author_avatar_url -- Profile image
 FROM
   posts p
 LEFT JOIN

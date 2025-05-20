@@ -79,41 +79,40 @@
   }
 
   .feed-grid {
-    column-count: 2;
-    column-gap: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
   }
 
   @media (min-width: 640px) {
     .feed-grid {
-      column-count: 3;
-      column-gap: 16px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
     }
   }
 
   @media (min-width: 768px) {
     .feed-grid {
-      column-count: 4;
-      column-gap: 16px;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 960px) {
     .feed-grid {
-      column-count: 4;
-      column-gap: 20px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
     }
   }
 
   @media (min-width: 1280px) {
     .feed-grid {
-      column-count: 4;
-      column-gap: 20px;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
     }
   }
 
   .masonry-item {
-    break-inside: avoid;
-    margin-bottom: 16px;
     width: 100%;
     display: block;
   }

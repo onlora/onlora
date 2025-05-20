@@ -123,8 +123,8 @@ interface TrendingFeedPost {
   coverImg: string | null
   author: {
     id: string | null
-    username: string | null
-    avatarUrl: string | null
+    name: string | null
+    image: string | null
   } | null
   likeCount: number | null
   commentCount: number | null
@@ -272,8 +272,8 @@ feedRoutes.get(
           coverImg: row.cover_img,
           author: {
             id: row.author_id,
-            username: row.author_username,
-            avatarUrl: row.author_avatar_url,
+            name: row.author_username,
+            image: row.author_avatar_url,
           },
           likeCount: row.like_count,
           commentCount: row.comment_count,
