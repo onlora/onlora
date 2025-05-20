@@ -115,8 +115,10 @@ export function SignInButton() {
       }
 
       toast.success('Successfully signed in!')
-      router.refresh()
       handleClose()
+      
+      // Force a complete page reload to ensure session state is updated
+      window.location.reload()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Error signing in')
     } finally {

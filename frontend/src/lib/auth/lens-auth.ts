@@ -67,13 +67,9 @@ export async function loginToLensAndGetIdToken(
  * @returns The authentication result containing user data
  */
 export async function authenticateWithLensToken(idToken: string) {
-  console.log(`Authenticating with Lens token ${idToken.substring(0, 15)}...`)
-
   // Use direct fetch to ensure correct request format
   const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
   const url = `${backendUrl}/api/auth/lens/signin`
-
-  console.log(`Making direct request to: ${url}`)
 
   try {
     const response = await fetch(url, {
@@ -92,12 +88,10 @@ export async function authenticateWithLensToken(idToken: string) {
     }
 
     const data = await response.json()
-    console.log('Auth successful, user data received')
 
     // Explicitly refresh the session state to ensure better-auth is aware of the new session
     try {
       await authClient.getSession()
-      console.log('Session refreshed successfully')
     } catch (sessionError) {
       console.warn(
         'Failed to refresh session, but auth was successful:',
