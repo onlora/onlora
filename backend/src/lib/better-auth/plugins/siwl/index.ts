@@ -130,7 +130,6 @@ export const siwl = (options: SIWLPluginOptions = {}): BetterAuthPlugin => {
             try {
               payload = (await jwtVerify(idToken, lensJWKS)).payload
 
-              console.log('payload', payload)
             } catch (e) {
               throw new APIError('UNAUTHORIZED', {
                 message: 'Invalid Lens ID token',
@@ -158,8 +157,6 @@ export const siwl = (options: SIWLPluginOptions = {}): BetterAuthPlugin => {
             // Fetch account using the actor address if available, otherwise use the wallet address
             const addressToUse = actorAddress || walletAddress
             const lensAccount = await fetchAccountByAddress(addressToUse)
-
-            console.log('lensAccount', lensAccount)
 
             if (!lensAccount) {
               throw new APIError('UNAUTHORIZED', {
@@ -193,17 +190,8 @@ export const siwl = (options: SIWLPluginOptions = {}): BetterAuthPlugin => {
             const nameFromLens = metadata?.name as string | undefined
             const pictureUrlFromLens = metadata?.picture as string | undefined
 
-            console.log('Lens authentication request for:', {
-              walletAddress,
-              accountAddress,
-              username,
-              nameFromToken: nameFromLens,
-              pictureFromToken: pictureUrlFromLens,
-            })
-
             let user: User
             // print context tables
-            console.log('context tables', ctx.context.tables)
             const lensAccountData = (await ctx.context.adapter.findOne({
               model: 'lensAccounts',
               where: [
@@ -213,7 +201,7 @@ export const siwl = (options: SIWLPluginOptions = {}): BetterAuthPlugin => {
 
             if (lensAccountData) {
               const foundUser = (await ctx.context.adapter.findOne({
-                model: 'users',
+                model: 'user',
                 where: [
                   {
                     field: 'id',
