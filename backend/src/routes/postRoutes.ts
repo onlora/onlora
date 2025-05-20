@@ -16,8 +16,6 @@ import {
   likes,
   postImages,
   posts,
-  users,
-  veTxns,
   visibilityEnum,
 } from '../db/schema'
 import {
@@ -400,22 +398,6 @@ postRoutes.post(
         }))
         await tx.insert(postImages).values(postImageEntries)
 
-        // 3. Handle VE grant for public post AND update image visibility
-        if (payload.visibility === 'public') {
-          const veGrantPublic = 2
-          await tx
-            .update(users)
-            .set({ vibe_energy: sql`${users.vibe_energy} + ${veGrantPublic}` })
-            .where(eq(users.id, userId))
-
-          await tx.insert(veTxns).values({
-            userId: userId,
-            delta: veGrantPublic,
-            reason: 'publish_public_post', // Standardized reason
-            refId: postId,
-          })
-        }
-
         // 4. Handle Remix-specific updates (if parentPostId is provided AND the new post is public)
         if (payload.parentPostId && payload.visibility === 'public') {
           // Find the parent post author ID
@@ -429,28 +411,10 @@ postRoutes.post(
               `Parent post ${payload.parentPostId} or its author not found during remix processing for public post ${postId}.`,
             )
           } else {
-            const parentAuthorId = parentPost.authorId
-            const veGrantRemix = 1
-
-            // Increment remix_count on parent post
             await tx
               .update(posts)
               .set({ remixCount: sql`${posts.remixCount} + 1` })
               .where(eq(posts.id, payload.parentPostId))
-
-            // Grant VE to parent post author
-            await tx
-              .update(users)
-              .set({ vibe_energy: sql`${users.vibe_energy} + ${veGrantRemix}` })
-              .where(eq(users.id, parentAuthorId))
-
-            // Record VE transaction for parent author
-            await tx.insert(veTxns).values({
-              userId: parentAuthorId,
-              delta: veGrantRemix,
-              reason: 'remix_bonus', // Reason for the parent author receiving VE
-              refId: postId, // Reference to the NEW post (the remix)
-            })
           }
         }
 
