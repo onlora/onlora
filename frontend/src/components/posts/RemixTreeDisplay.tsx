@@ -75,7 +75,7 @@ const RemixNodeCard: React.FC<{
 
 const RenderRemixBranch: React.FC<{
   branch: RemixTreeNode
-  currentPostId: number
+  currentPostId: string
 }> = ({ branch, currentPostId }) => {
   return (
     <li className="ml-0 list-none">

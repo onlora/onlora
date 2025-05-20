@@ -52,7 +52,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 const POSTS_PER_PAGE = 16
@@ -77,7 +77,7 @@ const shouldBeTall = (postId: string | number): boolean => {
   return hashSum % 5 === 0 || hashSum % 5 === 3
 }
 
-export default function GalleryPage() {
+function GalleryContent() {
   const { data: session } = useSession()
   const loggedInUserId = session?.user?.id
   const queryClient = useQueryClient()
@@ -738,5 +738,13 @@ export default function GalleryPage() {
         </div>
       </TooltipProvider>
     </ProtectedPage>
+  )
+}
+
+export default function GalleryPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <GalleryContent />
+    </Suspense>
   )
 }

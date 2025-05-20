@@ -1,11 +1,11 @@
 import { apiClient } from './apiClient'
-import type { FeedPostAuthor } from './feedApi' // Reuse author type if suitable
+import type { FeedPostAuthor } from './feedApi'; // Reuse author type if suitable
 
 // --- Types --- //
 
 // Type for a post item in search results (tailored)
 export interface PostSearchResultItem {
-  id: number
+  id: string
   title: string | null
   coverImg: string | null
   likeCount: number | null

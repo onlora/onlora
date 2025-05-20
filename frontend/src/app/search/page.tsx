@@ -1,6 +1,6 @@
 'use client'
 
-import FeedPostCard from '@/components/feed/FeedPostCard' // Reuse FeedPostCard
+import FeedPostCard from '@/components/feed/FeedPostCard'; // Reuse FeedPostCard
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'

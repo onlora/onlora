@@ -27,7 +27,7 @@ import { toast } from 'sonner'
 
 // Unified VibeItem type, compatible with FeedPostItem and ProfilePostItem for display purposes
 interface VibeItem {
-  id: number
+  id: string
   title: string | null
   coverImg: string | null
 }
@@ -82,7 +82,7 @@ export function VibePickerComponent() {
     }
   }
 
-  const handleSelectVibe = (vibeId: number) => {
+  const handleSelectVibe = (vibeId: string) => {
     // router.push(`/jam/new?remixSourcePostId=${vibeId}`)
     toast.warning('Coming soon!')
   }
