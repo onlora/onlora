@@ -1,6 +1,5 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { config } from '../config'
 import { INITIAL_VE_BALANCE } from '../config/constants'
 import { db } from '../db'
 import {
@@ -12,13 +11,6 @@ import {
 import { lensAccounts } from '../db/lens-schema'
 import { veTxns } from '../db/schema'
 import { siwl } from './better-auth/plugins/siwl'
-
-if (!config.googleClientId) {
-  throw new Error('Missing GOOGLE_CLIENT_ID environment variable')
-}
-if (!config.googleClientSecret) {
-  throw new Error('Missing GOOGLE_CLIENT_SECRET environment variable')
-}
 
 // Define the site URL based on environment
 export const auth = betterAuth({
@@ -32,12 +24,12 @@ export const auth = betterAuth({
       lensAccounts: lensAccounts,
     },
   }),
-  socialProviders: {
-    google: {
-      clientId: config.googleClientId,
-      clientSecret: config.googleClientSecret,
-    },
-  },
+  // socialProviders: {
+  //   google: {
+  //     clientId: config.googleClientId,
+  //     clientSecret: config.googleClientSecret,
+  //   },
+  // },
   plugins: [
     siwl({
       // useTestnet: process.env.NODE_ENV === 'development',

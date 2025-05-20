@@ -43,7 +43,7 @@ app.use('*', secureHeaders())
 app.use(
   '/api/*',
   cors({
-    origin: ['http://localhost:3000', 'https://api.onlora.ai'],
+    origin: ['http://localhost:3000', 'https://onlora.ai'],
     credentials: true,
   }),
 )

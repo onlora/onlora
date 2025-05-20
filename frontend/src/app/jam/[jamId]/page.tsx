@@ -488,9 +488,11 @@ export default function JamPage() {
 
       // Original posting logic - create Onlora post
       const onloraResult = await createPost(payload)
+      const lensLoggedIn = await isLensLoggedIn()
+      console.log('lensLoggedIn', lensLoggedIn)
 
       // Lens integration - try to publish to Lens if user is logged in
-      if ((await isLensLoggedIn()) && walletClient) {
+      if (lensLoggedIn && walletClient) {
         try {
           // Get authenticated Lens session
           const sessionClient = await getSessionClient()

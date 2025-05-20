@@ -12,8 +12,8 @@ export const config = {
   r2AccessKeyId: process.env.R2_ACCESS_KEY_ID,
   r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   r2PublicUrlBase: process.env.R2_PUBLIC_URL_BASE,
-  googleClientId: process.env.GOOGLE_CLIENT_ID,
-  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  // googleClientId: process.env.GOOGLE_CLIENT_ID,
+  // googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
   // Add other environment variables here as needed
   // For example:
   port: process.env.PORT || '8080',
@@ -51,10 +51,5 @@ if (
 ) {
   console.warn(
     'Warning: R2 environment variables are not fully configured. File upload features may not work.',
-  )
-}
-if (!config.googleClientId || !config.googleClientSecret) {
-  console.warn(
-    'Warning: Google OAuth environment variables (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET) are not fully configured. Google Sign-In may not work.',
   )
 }
