@@ -36,7 +36,7 @@ export const auth = betterAuth({
       // appId: config.lensAppId,
     }),
   ],
-  trustedOrigins: ['http://localhost:3000', 'https://api.onlora.ai'],
+  trustedOrigins: ['http://localhost:3000', 'https://onlora.ai'],
   databaseHooks: {
     user: {
       create: {
