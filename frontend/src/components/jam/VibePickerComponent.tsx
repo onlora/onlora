@@ -83,7 +83,8 @@ export function VibePickerComponent() {
   }
 
   const handleSelectVibe = (vibeId: number) => {
-    router.push(`/jam/new?remixSourcePostId=${vibeId}`)
+    // router.push(`/jam/new?remixSourcePostId=${vibeId}`)
+    toast.warning('Coming soon!')
   }
 
   const renderVibeList = (

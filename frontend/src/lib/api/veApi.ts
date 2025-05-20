@@ -3,14 +3,13 @@ import { type ApiError, apiClient } from './apiClient'
 export interface DailyBonusClaimResponse {
   success: boolean
   message: string
-  newVeBalance?: number
-  claimedToday?: boolean // Indicates if the bonus was (already) claimed for the current day by the backend
-  alreadyClaimed?: boolean // Explicitly true if the reason for no VE change is because it was already claimed
-  checkInStreak?: number // Current check-in streak
-  monthlyCheckIns?: number // Number of check-ins this month
-  maxMonthlyCheckIns?: number // Maximum allowed check-ins per month
-  streakBonus?: number // Bonus VE earned from streak
-  monthlyLimitReached?: boolean // True if the user has reached their monthly check-in limit
+  newVeBalance?: number // VE balance after a successful claim. Sent by POST on new claim.
+  claimedToday?: boolean // True if the bonus is claimed for the current day.
+  checkInStreak?: number
+  monthlyCheckIns?: number
+  maxMonthlyCheckIns?: number
+  streakBonus?: number // Bonus VE amount from the streak.
+  monthlyLimitReached?: boolean
 }
 
 /**
@@ -37,10 +36,41 @@ export const claimDailyBonus = async (): Promise<DailyBonusClaimResponse> => {
         apiError.message ||
         'Failed to claim daily bonus due to an unknown error.',
       claimedToday: false, // Or based on specific error codes if available
-      alreadyClaimed: false,
     }
   }
 }
+
+/**
+ * Fetches the daily check-in status for the authenticated user.
+ */
+export const getDailyCheckInStatus =
+  async (): Promise<DailyBonusClaimResponse> => {
+    try {
+      return await apiClient<DailyBonusClaimResponse>(
+        '/ve/daily-check-in-status',
+        {
+          method: 'GET',
+          credentials: 'include',
+        },
+      )
+    } catch (error) {
+      console.error('Error in getDailyCheckInStatus API call:', error)
+      const apiError = error as ApiError
+      return {
+        success: false,
+        message:
+          apiError.message ||
+          'Failed to fetch daily bonus status due to an unknown error.',
+        // Default values for status fields, assuming failure means status unknown/not claimed
+        claimedToday: false,
+        checkInStreak: 0,
+        monthlyCheckIns: 0,
+        maxMonthlyCheckIns: 20, // Or fetch from a config if it varies
+        streakBonus: 0,
+        monthlyLimitReached: false,
+      }
+    }
+  }
 
 export interface VeCostResponse {
   cost: number

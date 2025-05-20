@@ -139,10 +139,15 @@ veApp.post('/daily-check-in', requireAuthMiddleware, async (c) => {
         message: 'Daily bonus already claimed for today.',
         newVeBalance: currentUserState.vibe_energy,
         claimedToday: true,
-        alreadyClaimed: true,
         checkInStreak: currentUserState.check_in_streak || 0,
         monthlyCheckIns: currentUserState.monthly_check_ins || 0,
         maxMonthlyCheckIns: MAX_MONTHLY_CHECK_INS,
+        monthlyLimitReached:
+          (currentUserState.monthly_check_ins || 0) >= MAX_MONTHLY_CHECK_INS,
+        streakBonus: Math.min(
+          Math.floor((currentUserState.check_in_streak || 0) / STREAK_INTERVAL),
+          MAX_STREAK_BONUS,
+        ),
       })
     }
 
@@ -155,11 +160,14 @@ veApp.post('/daily-check-in', requireAuthMiddleware, async (c) => {
         message: `You have reached the maximum check-ins for this month (${MAX_MONTHLY_CHECK_INS}). VE will be available again next month.`,
         newVeBalance: currentUserState.vibe_energy,
         claimedToday: false,
-        alreadyClaimed: false,
         checkInStreak: currentUserState.check_in_streak || 0,
         monthlyCheckIns: monthlyCheckIns,
         maxMonthlyCheckIns: MAX_MONTHLY_CHECK_INS,
         monthlyLimitReached: true,
+        streakBonus: Math.min(
+          Math.floor((currentUserState.check_in_streak || 0) / STREAK_INTERVAL),
+          MAX_STREAK_BONUS,
+        ),
       })
     }
 
@@ -227,11 +235,11 @@ veApp.post('/daily-check-in', requireAuthMiddleware, async (c) => {
       message: `Daily bonus claimed successfully! +${dailyBonusAmount} VE${streakBonus > 0 ? ` (includes +${streakBonus} streak bonus)` : ''}`,
       newVeBalance: newVeBalance,
       claimedToday: true,
-      alreadyClaimed: false,
       checkInStreak: checkInStreak,
       monthlyCheckIns: monthlyCheckIns + 1,
       maxMonthlyCheckIns: MAX_MONTHLY_CHECK_INS,
       streakBonus: streakBonus,
+      monthlyLimitReached: false,
     })
   } catch (error) {
     logger.error(
@@ -242,6 +250,129 @@ veApp.post('/daily-check-in', requireAuthMiddleware, async (c) => {
       {
         success: false,
         message: 'Failed to claim daily bonus. Please try again later.',
+      },
+      500,
+    )
+  }
+})
+
+// GET /api/ve/daily-check-in-status - Fetch daily VE check-in status
+veApp.get('/daily-check-in-status', requireAuthMiddleware, async (c) => {
+  const userSession = c.get('user')
+  if (!userSession || !userSession.id) {
+    return c.json(
+      {
+        success: false,
+        message: 'Authentication required.',
+      },
+      401,
+    )
+  }
+  const userId = userSession.id
+
+  try {
+    const todayUTCStart = new Date()
+    todayUTCStart.setUTCHours(0, 0, 0, 0)
+
+    const currentUserState = await db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: {
+        vibe_energy: true,
+        last_daily_bonus_claimed_at: true,
+        check_in_streak: true,
+        monthly_check_ins: true,
+      },
+    })
+
+    if (!currentUserState) {
+      return c.json(
+        {
+          success: false,
+          message: 'User not found.',
+        },
+        404,
+      )
+    }
+
+    let alreadyClaimedToday = false
+    if (currentUserState.last_daily_bonus_claimed_at) {
+      const lastClaimDate = new Date(
+        currentUserState.last_daily_bonus_claimed_at,
+      )
+      if (lastClaimDate >= todayUTCStart) {
+        alreadyClaimedToday = true
+      }
+    }
+
+    const monthlyCheckIns = currentUserState.monthly_check_ins || 0
+    const monthlyLimitReached = monthlyCheckIns >= MAX_MONTHLY_CHECK_INS
+
+    // Calculate streak for status display, even if claimed or limit reached
+    const checkInStreak = currentUserState.check_in_streak || 0
+    const yesterday = new Date(todayUTCStart)
+    yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+
+    if (currentUserState.last_daily_bonus_claimed_at) {
+      const lastClaimDate = new Date(
+        currentUserState.last_daily_bonus_claimed_at,
+      )
+      const lastClaimDay = new Date(
+        lastClaimDate.getUTCFullYear(),
+        lastClaimDate.getUTCMonth(),
+        lastClaimDate.getUTCDate(),
+      )
+
+      if (lastClaimDay.getTime() === yesterday.getTime()) {
+        // Streak would continue if they claimed today (or did)
+        // If already claimed, this reflects current streak.
+        // If not claimed yet, this reflects potential streak.
+        // No change to checkInStreak variable here, it's loaded from DB.
+      } else if (
+        lastClaimDay.getTime() < yesterday.getTime() &&
+        !alreadyClaimedToday
+      ) {
+        // Streak would be broken and reset to 1 if they were to claim now
+        // but since this is a GET, we show current saved streak.
+        // If they haven't claimed today AND their last claim wasn't yesterday,
+        // their current streak is what's in DB. If they *do* claim, it will reset to 1.
+        // For status display, we might want to show potential:
+        // If not claimed today, and last claim was not yesterday, a new claim would result in streak 1.
+        // However, for just displaying current status, the DB value is correct.
+      }
+    } else if (!alreadyClaimedToday) {
+      // If never claimed before and not claimed today, a new claim would be streak 1.
+      // Current streak is 0.
+    }
+
+    // Streak bonus calculation for display purposes
+    const streakBonus = Math.min(
+      Math.floor(checkInStreak / STREAK_INTERVAL),
+      MAX_STREAK_BONUS,
+    )
+
+    return c.json({
+      success: true,
+      message: alreadyClaimedToday
+        ? 'Daily bonus already claimed for today.'
+        : monthlyLimitReached
+          ? `Monthly check-in limit reached (${MAX_MONTHLY_CHECK_INS}).`
+          : 'Daily bonus is available.',
+      claimedToday: alreadyClaimedToday,
+      checkInStreak: checkInStreak,
+      monthlyCheckIns: monthlyCheckIns,
+      maxMonthlyCheckIns: MAX_MONTHLY_CHECK_INS,
+      monthlyLimitReached: monthlyLimitReached,
+      streakBonus: streakBonus,
+    })
+  } catch (error) {
+    logger.error(
+      { userId, error: String(error) },
+      `Unexpected error fetching daily bonus status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    )
+    return c.json(
+      {
+        success: false,
+        message: 'Failed to fetch daily bonus status. Please try again later.',
       },
       500,
     )

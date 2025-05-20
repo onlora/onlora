@@ -18,6 +18,7 @@ import postRoutes from './routes/postRoutes'
 import searchRoutes from './routes/searchRoutes'
 import userRoutes from './routes/userRoutes'
 import veAppRoutes from './routes/veRoutes'
+import { initRefreshHotViewWorker } from './workers/refreshHotViewWorker'
 
 interface AppEnv extends AuthenticatedContextEnv {}
 
@@ -124,6 +125,9 @@ app.notFound((c) => {
   )
   return c.json({ code: 404, message: 'Not Found' }, 404)
 })
+
+// Initialize the hot view refresh worker
+initRefreshHotViewWorker()
 
 const startServer = async () => {
   try {

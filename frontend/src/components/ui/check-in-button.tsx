@@ -1,6 +1,6 @@
 'use client'
 
-import { claimDailyBonus } from '@/lib/api/veApi'
+import { claimDailyBonus, getDailyCheckInStatus } from '@/lib/api/veApi'
 import { cn } from '@/lib/utils'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -116,7 +116,8 @@ function CompactCheckInStatus() {
     queryKey: ['checkInStatus'],
     queryFn: async () => {
       try {
-        const response = await claimDailyBonus()
+        // Use the new GET function to fetch status without claiming
+        const response = await getDailyCheckInStatus()
         return response
       } catch (error) {
         console.error('Error fetching check-in status:', error)
@@ -148,14 +149,14 @@ function CompactCheckInStatus() {
     checkInStreak = 0,
     monthlyCheckIns = 0,
     maxMonthlyCheckIns = 20,
-    alreadyClaimed = false,
+    claimedToday = false,
     monthlyLimitReached = false,
+    streakBonus = 0,
   } = data || {}
 
   // Calculate the VE bonus amount based on streak
   const BASE_VE_BONUS = 50 // Base amount
-  const streakBonusAmount = Math.min(Math.floor(checkInStreak / 5), 5) // Max +5 bonus
-  const totalVEBonus = BASE_VE_BONUS + streakBonusAmount
+  const totalVEBonus = BASE_VE_BONUS + streakBonus
 
   return (
     <div className="space-y-3">
@@ -166,14 +167,14 @@ function CompactCheckInStatus() {
           <div
             className={cn(
               'h-10 w-10 rounded-full flex items-center justify-center shrink-0',
-              alreadyClaimed
+              claimedToday
                 ? 'bg-teal-100'
                 : monthlyLimitReached
                   ? 'bg-amber-100'
                   : 'bg-emerald-100',
             )}
           >
-            {alreadyClaimed ? (
+            {claimedToday ? (
               <CheckCircle className="h-6 w-6 text-teal-500" />
             ) : monthlyLimitReached ? (
               <XCircle className="h-6 w-6 text-amber-500" />
@@ -183,14 +184,14 @@ function CompactCheckInStatus() {
           </div>
           <div>
             <p className="font-medium text-slate-800">
-              {alreadyClaimed
+              {claimedToday
                 ? 'Already claimed today'
                 : monthlyLimitReached
                   ? 'Monthly limit reached'
                   : 'Bonus available'}
             </p>
             <p className="text-xs text-slate-500">
-              {alreadyClaimed
+              {claimedToday
                 ? 'Come back tomorrow for more VE!'
                 : monthlyLimitReached
                   ? `Max ${maxMonthlyCheckIns} claims reached this month`
@@ -205,7 +206,7 @@ function CompactCheckInStatus() {
             <div
               className={cn(
                 'flex items-center justify-center h-10 px-3 rounded-full font-medium text-sm',
-                alreadyClaimed
+                claimedToday
                   ? 'bg-teal-100 text-teal-600'
                   : 'bg-emerald-100 text-emerald-600',
               )}
@@ -228,9 +229,9 @@ function CompactCheckInStatus() {
               <span className="font-medium text-slate-800">
                 {checkInStreak} day streak
               </span>
-              {streakBonusAmount > 0 && (
+              {streakBonus > 0 && (
                 <span className="text-xs text-emerald-500">
-                  +{streakBonusAmount} VE
+                  +{streakBonus} VE
                 </span>
               )}
             </div>
@@ -254,7 +255,7 @@ function CompactCheckInStatus() {
         {!monthlyLimitReached && (
           <div className="rounded-xl bg-white border border-slate-200 p-3">
             <p className="text-xs font-medium text-slate-500 mb-2">
-              {alreadyClaimed ? "Today's Reward" : 'Reward Breakdown'}
+              {claimedToday ? "Today's Reward" : 'Reward Breakdown'}
             </p>
             <div className="grid grid-cols-2 gap-1 text-sm">
               <span className="text-slate-500">Base</span>
@@ -264,7 +265,7 @@ function CompactCheckInStatus() {
 
               <span className="text-slate-500">Streak</span>
               <span className="text-right font-medium text-slate-700">
-                +{streakBonusAmount} VE
+                +{streakBonus} VE
               </span>
 
               <span className="font-medium text-slate-700 mt-1 pt-1 border-t border-slate-100">
@@ -296,7 +297,7 @@ function CompactCheckInStatus() {
                   day <= monthlyCheckIns
                     ? 'bg-emerald-500 text-white'
                     : day === monthlyCheckIns + 1 &&
-                        !alreadyClaimed &&
+                        !claimedToday &&
                         !monthlyLimitReached
                       ? 'border border-emerald-200 text-emerald-600 animate-pulse'
                       : 'bg-slate-100 text-slate-400',
